@@ -202,11 +202,13 @@ describe('casino 家族 —— group 包含链', () => {
     }
   });
 
-  it('规模：12 条、family 全为 casino、id 与 name 唯一', () => {
-    expect(casinoBadges).toHaveLength(12);
+  it('family 全为 casino、id 与 name 唯一', () => {
+    // 条数刻意不写死：徽章会持续增补，写死只会让每次加徽章都得来改这里。
+    // 真正要守的是「家族归属正确」与「id / name 唯一」。
+    expect(casinoBadges.length).toBeGreaterThan(0);
     expect(casinoBadges.every(b => b.family === 'casino')).toBe(true);
-    expect(new Set(casinoBadges.map(b => b.id)).size).toBe(12);
-    expect(new Set(casinoBadges.map(b => b.name)).size).toBe(12);
+    expect(new Set(casinoBadges.map(b => b.id)).size).toBe(casinoBadges.length);
+    expect(new Set(casinoBadges.map(b => b.name)).size).toBe(casinoBadges.length);
   });
 
   it('定价由概率导出，而非手填（rarity 不再是作者的选择）', () => {
@@ -220,10 +222,11 @@ describe('casino 家族 —— group 包含链', () => {
   });
 });
 
-describe('casino 家族 —— 与既有 64 条的等价性核查', () => {
-  it('与既有 64 条不存在逐字等价（全 6 字符空间差异见证）', () => {
+describe('casino 家族 —— 与既有徽章的等价性核查', () => {
+  it('与既有徽章不存在逐字等价（全 6 字符空间差异见证）', () => {
     const existing = allBadges.filter(b => b.family !== 'casino');
-    expect(existing.length).toBe(64);
+    // 条数不写死：它只是「除 casino 外的全部徽章」，会随增补变化。
+    expect(existing.length).toBeGreaterThan(0);
 
     const NC = casinoBadges.length;
     const NE = existing.length;
@@ -231,23 +234,27 @@ describe('casino 家族 —— 与既有 64 条的等价性核查', () => {
     const pending = new Set<number>();
     for (let p = 0; p < NC * NE; p += 1) pending.add(p);
 
+    // 用「命中下标掩码」而不是 32 位整数位掩码。
+    //
+    // 原实现用 `1 << j` / `(elo >> j) & 1`，而 JS 的位运算是 **32 位**的：
+    // `existing` 一旦超过 32 条，`j >= 32` 的位就会回绕、与低位共享同一个 bit，
+    // 于是两枚无关徽章被当成同一枚判读——**结论静默出错，测试却照样绿**。
+    // 现在 existing 已有一百多条，必须换成不受位宽限制的表示。
+    const cMask = new Uint8Array(NC);
+    const eMask = new Uint8Array(NE);
+
     const inspect = (color: ColorInfo): void => {
       if (pending.size === 0) return;
-      let cm = 0;
-      for (let i = 0; i < NC; i += 1) if (casinoBadges[i].check(color)) cm |= 1 << i;
-      let elo = 0;
-      let ehi = 0;
-      for (let j = 0; j < NE; j += 1) {
-        if (!existing[j].check(color)) continue;
-        if (j < 32) elo |= 1 << j;
-        else ehi |= 1 << (j - 32);
-      }
-      for (const p of [...pending]) {
+      cMask.fill(0);
+      eMask.fill(0);
+      for (let i = 0; i < NC; i += 1) if (casinoBadges[i].check(color)) cMask[i] = 1;
+      for (let j = 0; j < NE; j += 1) if (existing[j].check(color)) eMask[j] = 1;
+
+      for (const p of pending) {
         const i = Math.floor(p / NE);
         const j = p % NE;
-        const cHit = (cm >> i) & 1;
-        const eHit = j < 32 ? (elo >> j) & 1 : (ehi >> (j - 32)) & 1;
-        if (cHit !== eHit) pending.delete(p);
+        // 一方命中、另一方不命中 ⇒ 这一对已被区分
+        if (cMask[i] !== eMask[j]) pending.delete(p);
       }
     };
 
@@ -264,7 +271,7 @@ describe('casino 家族 —— 与既有 64 条的等价性核查', () => {
     expect(report, `发现逐字等价：${report.join(', ')}`).toEqual([]);
   }, 600000);
 
-  it('与既有 64 条的包含关系（150000 采样报告，精确值见 docs/badges/casino.md）', () => {
+  it('与既有徽章的包含关系（150000 采样报告，精确值见 docs/badges/casino.md）', () => {
     const existing = allBadges.filter(b => b.family !== 'casino');
     const NC = casinoBadges.length;
     const NE = existing.length;

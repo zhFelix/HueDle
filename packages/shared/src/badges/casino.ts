@@ -195,4 +195,64 @@ export const casinoBadges: BadgeDef[] = [
         return low === 6 || low === 0;
       }),
   },
+    {
+    id: 'casino-four-two',
+    name: '四二组合',
+    description: 'HEX 六个字符恰好一个点数出现 4 次、另一个点数出现 2 次',
+    family: 'casino',
+    check: c => {
+      const counts = new Map<string, number>();
+      for (const ch of c.hex.slice(1)) {
+        counts.set(ch, (counts.get(ch) ?? 0) + 1);
+      }
+      const vals = [...counts.values()].sort((a, b) => b - a);
+      return vals.length === 2 && vals[0] === 4 && vals[1] === 2;
+    },
+  },
+  {
+    id: 'casino-three-three',
+    name: '三三同辉',
+    description: 'HEX 六个字符恰好两个点数各出现 3 次',
+    family: 'casino',
+    check: c => {
+      const counts = new Map<string, number>();
+      for (const ch of c.hex.slice(1)) {
+        counts.set(ch, (counts.get(ch) ?? 0) + 1);
+      }
+      const vals = [...counts.values()].sort((a, b) => b - a);
+      return vals.length === 2 && vals[0] === 3 && vals[1] === 3;
+    },
+  },
+  {
+    id: 'casino-straight-pair',
+    name: '顺子带对',
+    description: 'HEX 六个字符含 5 个互不相同的连续点数，且其中恰好一个点数重复一次',
+    family: 'casino',
+    check: c => {
+      const s = c.hex.slice(1);
+      const counts = new Map<string, number>();
+      for (const ch of s) {
+        counts.set(ch, (counts.get(ch) ?? 0) + 1);
+      }
+      const vals = [...counts.values()].sort((a, b) => b - a);
+      if (vals.length !== 5 || vals[0] !== 2) return false;
+      const nums = [...new Set(s)]
+        .map(ch => parseInt(ch, 16))
+        .sort((a, b) => a - b);
+      for (let i = 1; i < nums.length; i++) {
+        if (nums[i] - nums[i - 1] !== 1) return false;
+      }
+      return true;
+    },
+  },
+  {
+    id: 'casino-extreme-flush',
+    name: '极端同花',
+    description: 'HEX 六个字符全部落在 0–3（极低半花），或全部落在 C–F（极高半花）',
+    family: 'casino',
+    check: c => {
+      const vals = [...c.hex.slice(1)].map(ch => parseInt(ch, 16));
+      return vals.every(v => v <= 3) || vals.every(v => v >= 12);
+    },
+  },
 ];

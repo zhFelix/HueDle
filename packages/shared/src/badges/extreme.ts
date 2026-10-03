@@ -57,4 +57,44 @@ export const extremeBadges: BadgeDef[] = [
     family: 'extreme',
     check: c => channelSum(c) >= 750 && channelSum(c) <= 764,
   },
+    {
+    id: 'extreme-single-max',
+    name: '单峰满值',
+    description: 'R、G、B 中恰好一个等于 255，其余两个都小于 100',
+    family: 'extreme',
+    check: c => {
+      const nums = [c.r, c.g, c.b];
+      return (
+        nums.filter(v => v === 255).length === 1 &&
+        nums.filter(v => v < 100).length === 2
+      );
+    },
+  },
+  {
+    id: 'extreme-near-span',
+    name: '近域全跨',
+    description: 'R、G、B 的极差在 240 到 254 之间（含），排除 255',
+    family: 'extreme',
+    check: c => {
+      const span = maxChannel(c) - minChannel(c);
+      return span >= 240 && span <= 254;
+    },
+  },
+  {
+    id: 'extreme-mid-extreme',
+    name: '一低一高',
+    description: 'R、G、B 中至少一个 ≤ 15，且至少一个 ≥ 240',
+    family: 'extreme',
+    check: c => {
+      const nums = [c.r, c.g, c.b];
+      return nums.some(v => v <= 15) && nums.some(v => v >= 240);
+    },
+  },
+  {
+    id: 'extreme-double-low',
+    name: '双低同现',
+    description: 'R、G、B 中恰好两个 ≤ 10',
+    family: 'extreme',
+    check: c => [c.r, c.g, c.b].filter(v => v <= 10).length === 2,
+  },
 ];

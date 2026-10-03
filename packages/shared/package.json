@@ -12,7 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "enumerate": "vitest run --config vitest.enumerate.config.ts",
+    "enumerate": "vitest run --config vitest.enumerate.config.ts scripts/enumerate.test.ts",
     "supersession": "vitest run --config vitest.enumerate.config.ts scripts/supersession.test.ts",
     "docs": "UPDATE_DOCS=1 vitest run src/badges/__tests__/docs.test.ts"
   },

@@ -109,4 +109,91 @@ export const patternBadges: BadgeDef[] = [
       return chars.slice(0, 3) === chars.slice(3);
     },
   },
+    {
+    id: 'pattern-alternating',
+    name: '交错排列',
+    description: 'HEX 六个字符按 ABABAB 模式交替出现，且两种字符不同',
+    family: 'pattern',
+    check: c => {
+      const s = c.hex.slice(1);
+      return (
+        s[0] === s[2] && s[2] === s[4] &&
+        s[1] === s[3] && s[3] === s[5] &&
+        s[0] !== s[1]
+      );
+    },
+  },
+  {
+    id: 'pattern-palindrome-loop',
+    name: '六字回文',
+    description: 'HEX 六个字符按 ABCCBA 模式镜像对称',
+    family: 'pattern',
+    check: c => {
+      const s = c.hex.slice(1);
+      return s[0] === s[5] && s[1] === s[4] && s[2] === s[3];
+    },
+  },
+  {
+    id: 'pattern-triple-blocks',
+    name: '三三分块',
+    description: 'HEX 前三位相同、后三位相同，两组不同（AAABBB）',
+    family: 'pattern',
+    check: c => {
+      const s = c.hex.slice(1);
+      return (
+        s[0] === s[1] && s[1] === s[2] &&
+        s[3] === s[4] && s[4] === s[5] &&
+        s[0] !== s[3]
+      );
+    },
+  },
+  {
+    id: 'pattern-double-blocks',
+    name: '二二二分块',
+    description: 'HEX 六个字符按 AABBCC 模式，每两位相同',
+    family: 'pattern',
+    check: c => {
+      const s = c.hex.slice(1);
+      return s[0] === s[1] && s[2] === s[3] && s[4] === s[5];
+    },
+  },
+  {
+    id: 'pattern-rising-strict',
+    name: '六符递升',
+    description: 'HEX 六个字符的十六进制值从左到右严格递增',
+    family: 'pattern',
+    check: c => {
+      const s = c.hex.slice(1);
+      for (let i = 1; i < s.length; i++) {
+        if (parseInt(s[i], 16) <= parseInt(s[i - 1], 16)) return false;
+      }
+      return true;
+    },
+  },
+  {
+    id: 'pattern-falling-strict',
+    name: '六符递降',
+    description: 'HEX 六个字符的十六进制值从左到右严格递减',
+    family: 'pattern',
+    check: c => {
+      const s = c.hex.slice(1);
+      for (let i = 1; i < s.length; i++) {
+        if (parseInt(s[i], 16) >= parseInt(s[i - 1], 16)) return false;
+      }
+      return true;
+    },
+  },
+  {
+    id: 'pattern-no-triple',
+    name: '无三重',
+    description: 'HEX 六个字符中没有任何一个字符出现三次及以上',
+    family: 'pattern',
+    check: c => {
+      const counts = new Map<string, number>();
+      for (const ch of c.hex.slice(1)) {
+        counts.set(ch, (counts.get(ch) ?? 0) + 1);
+      }
+      return [...counts.values()].every(v => v <= 2);
+    },
+  },
 ];

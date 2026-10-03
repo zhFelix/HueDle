@@ -67,11 +67,12 @@ describe('useBadges', () => {
   });
 
   // ── ③ 空历史 ────────────────────────────────────────────────────────────
-  it('3. 空历史：0/76，各家族 0/m，不抛异常', () => {
+  it('3. 空历史：全 0，各家族 0/m，不抛异常', () => {
     const { families, totalCollected, totalCount } = useBadges();
 
     expect(totalCollected.value).toBe(0);
-    expect(totalCount.value).toBe(76);
+    // 交叉断言而非写死：徽章会持续增补，写死的数字只会让每次加徽章都来改测试。
+    expect(totalCount.value).toBe(allBadges.length);
     expect(families.value).toHaveLength(10);
     for (const progress of families.value) {
       expect(progress.collected).toBe(0);
@@ -96,7 +97,6 @@ describe('useBadges', () => {
     const covered = families.value.reduce((sum, progress) => sum + progress.total, 0);
     expect(covered).toBe(allBadges.length);
     expect(totalCount.value).toBe(allBadges.length);
-    expect(allBadges.length).toBe(76);
   });
 
   it('4b. 未收集的徽章也在分组里：badgesByFamily 覆盖 allBadges 全部 id', () => {

@@ -73,4 +73,32 @@ export const luckyBadges: BadgeDef[] = [
     family: 'lucky',
     check: color => color.r === 255 && color.g === 215 && color.b === 0,
   },
+    {
+    id: 'lucky-triple-seven',
+    name: '七连三',
+    description: 'HEX 中包含连续子串 "777"',
+    family: 'lucky',
+    check: c => c.hex.includes('777'),
+  },
+  {
+    id: 'lucky-triple-nine',
+    name: '九九归一',
+    description: 'HEX 中包含连续子串 "999"',
+    family: 'lucky',
+    check: c => c.hex.includes('999'),
+  },
+  {
+    id: 'lucky-sum-555',
+    name: '五五五同心',
+    description: 'R + G + B = 555',
+    family: 'lucky',
+    check: c => channelSum(c) === 555,
+  },
+  {
+    id: 'lucky-sum-666',
+    name: '六六六同心',
+    description: 'R + G + B = 666',
+    family: 'lucky',
+    check: c => channelSum(c) === 666,
+  },
 ];

@@ -6,7 +6,7 @@
 
 ## 配额看板
 
-- 徽章总数：**76**
+- 徽章总数：**126**
 - 家族数：**10**
 - 取代组（group）：**2** 组，覆盖 **11** 条徽章
 - 被取代关系数：**9**（同组内除 CP 最高者外，计分时会被吞掉的成员数）
@@ -15,27 +15,27 @@
 
 | family | 中文 | 条数 | 代表色 |
 |---|---|---:|---|
-| gray | 灰阶 | 6 | `#808080` |
-| extreme | 极端 | 6 | `#FF0000` |
-| pure | 纯色 | 6 | `#FF0000` |
-| channel | 通道 | 6 | `#00FF00` |
-| math | 数学 | 10 | `#010101` |
-| perception | 感知 | 8 | `#FF6600` |
-| pattern | 模式 | 8 | `#A5A5A5` |
-| culture | 文化 | 8 | `#002FA7` |
-| lucky | 玄学 | 6 | `#FFD700` |
-| casino | 牌型 | 12 | `#C8102E` |
+| gray | 灰阶 | 10 | `#808080` |
+| extreme | 极端 | 10 | `#FF0000` |
+| pure | 纯色 | 10 | `#FF0000` |
+| channel | 通道 | 11 | `#00FF00` |
+| math | 数学 | 17 | `#010101` |
+| perception | 感知 | 12 | `#FF6600` |
+| pattern | 模式 | 15 | `#A5A5A5` |
+| culture | 文化 | 15 | `#002FA7` |
+| lucky | 玄学 | 10 | `#FFD700` |
+| casino | 牌型 | 16 | `#C8102E` |
 
 ### 按 rarity 分布
 
 | rarity | 条数 |
 |---|---:|
-| common | 11 |
-| uncommon | 11 |
-| rare | 14 |
-| epic | 8 |
-| anomaly | 16 |
-| mythic | 16 |
+| common | 17 |
+| uncommon | 16 |
+| rare | 23 |
+| epic | 19 |
+| anomaly | 20 |
+| mythic | 31 |
 
 ## 家族明细
 
@@ -43,7 +43,7 @@
 
 ### gray — 灰阶
 
-- 条数：**6**
+- 条数：**10**
 - 代表色：`#808080`
 
 | id | 名称 | 判定条件 | 稀有度 | 命中数 | 概率 p | CP (ep) | group |
@@ -54,10 +54,14 @@
 | gray-frost-zone | 霜白灰域 | 三通道极差 ≤ 4，且最小值 ≥ 231 | anomaly | 1,345 | 8.02e-5 | 1,247,377 | — |
 | gray-mid-zone | 中庸灰域 | 三通道极差 ≤ 1，且三通道都落在 100–156 | anomaly | 393 | 2.34e-5 | 4,269,012 | — |
 | gray-core-echo | 灰核残响 | 三通道极差 = 3，且最小值 = 128 | mythic | 18 | 1.07e-6 | 93,206,756 | — |
+| gray-multiple-16 | 十六分灰 | R = G = B 且该值是 16 的倍数 | mythic | 16 | 9.54e-7 | 104,857,600 | — |
+| gray-binary-power | 灰之幂 | R = G = B 且该值是 2 的正整数次幂 | mythic | 8 | 4.77e-7 | 209,715,200 | — |
+| gray-palindrome | 灰之回文 | R = G = B 且该值是回文数 | mythic | 35 | 2.09e-6 | 47,934,903 | — |
+| gray-prime | 灰之质数 | R = G = B 且该值是质数 | mythic | 54 | 3.22e-6 | 31,068,919 | — |
 
 ### extreme — 极端
 
-- 条数：**6**
+- 条数：**10**
 - 代表色：`#FF0000`
 
 | id | 名称 | 判定条件 | 稀有度 | 命中数 | 概率 p | CP (ep) | group |
@@ -68,10 +72,14 @@
 | extreme-dual-max | 双峰满值 | R、G、B 中恰有两个等于 255 | anomaly | 765 | 4.56e-5 | 2,193,100 | — |
 | extreme-floor-glow | 贴地微光 | 0 < R + G + B ≤ 15 | anomaly | 815 | 4.86e-5 | 2,058,554 | — |
 | extreme-ceiling-glow | 贴顶余晖 | 750 ≤ R + G + B ≤ 764 | anomaly | 815 | 4.86e-5 | 2,058,554 | — |
+| extreme-single-max | 单峰满值 | R、G、B 中恰好一个等于 255，其余两个都小于 100 | rare | 30,000 | 0.18% | 55,924 | — |
+| extreme-near-span | 近域全跨 | R、G、B 的极差在 240 到 254 之间（含），排除 255 | uncommon | 198,390 | 1.18% | 8,457 | — |
+| extreme-mid-extreme | 一低一高 | R、G、B 中至少一个 ≤ 15，且至少一个 ≥ 240 | uncommon | 368,640 | 2.20% | 4,551 | — |
+| extreme-double-low | 双低同现 | R、G、B 中恰好两个 ≤ 10 | rare | 88,935 | 0.53% | 18,865 | — |
 
 ### pure — 纯色
 
-- 条数：**6**
+- 条数：**10**
 - 代表色：`#FF0000`
 
 | id | 名称 | 判定条件 | 稀有度 | 命中数 | 概率 p | CP (ep) | group |
@@ -82,10 +90,14 @@
 | pure-yellow-twin | 鹅黄双峰 | R = G 且 R > 0 且 B = 0 | anomaly | 255 | 1.52e-5 | 6,579,300 | — |
 | pure-cyan-twin | 青碧双峰 | G = B 且 G > 0 且 R = 0 | anomaly | 255 | 1.52e-5 | 6,579,300 | — |
 | pure-magenta-full | 品红满值 | R = 255 且 G = 0 且 B = 255 | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
+| pure-dim-red | 暗赤 | HEX 精确等于 #800000（暗红 / 栗色） | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
+| pure-dim-green | 暗绿 | HEX 精确等于 #008000 | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
+| pure-dim-blue | 暗蓝 | HEX 精确等于 #000080（海军蓝） | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
+| pure-dim-yellow | 暗黄 | HEX 精确等于 #808000（橄榄色） | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
 
 ### channel — 通道
 
-- 条数：**6**
+- 条数：**11**
 - 代表色：`#00FF00`
 
 | id | 名称 | 判定条件 | 稀有度 | 命中数 | 概率 p | CP (ep) | group |
@@ -96,10 +108,15 @@
 | channel-all-low | 低值通道 | R ≤ 127 且 G ≤ 127 且 B ≤ 127 | common | 2,097,152 | 12.50% | 800 | — |
 | channel-twin-high | 双峰突起 | R = G 且 R > 0 且 B > R，或 G = B 且 G > 0 且 R > G，或 R = B 且 R > 0 且 G > R | rare | 97,155 | 0.58% | 17,269 | — |
 | channel-extreme-shift | 极值错位 | R = 255 且 G = 0 且 B = 128 | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
+| channel-tight-spread | 通道紧密 | R、G、B 三数的最大值与最小值之差不超过 10 | rare | 82,426 | 0.49% | 20,354 | — |
+| channel-wide-spread | 通道广域 | R、G、B 三数的最大值与最小值之差至少为 240 | uncommon | 199,920 | 1.19% | 8,392 | — |
+| channel-mid-only | 中间地带 | R、G、B 三数全部落在 100 到 150 之间（含） | rare | 132,651 | 0.79% | 12,648 | — |
+| channel-far-apart | 双峰远隔 | R、G、B 中最大值与最小值之差至少为 200，且相邻排序差都小于 200 | common | 1,730,064 | 10.31% | 970 | — |
+| channel-three-peaks | 三峰齐高 | R、G、B 三数全部大于 200 | rare | 166,375 | 0.99% | 10,084 | — |
 
 ### math — 数学
 
-- 条数：**10**
+- 条数：**17**
 - 代表色：`#010101`
 
 | id | 名称 | 判定条件 | 稀有度 | 命中数 | 概率 p | CP (ep) | group |
@@ -114,10 +131,17 @@
 | math-coprime-trinity | 互质三数 | R、G、B 的最大公约数为 1 | common | 13,936,093 | 83.07% | 120 | — |
 | math-bitwise-or-255 | 位满八极 | R、G、B 按位或的结果为 255 | common | 5,764,801 | 34.36% | 291 | — |
 | math-doubling-ladder | 倍增之链 | 将 R、G、B 升序排列后成 1 : 2 : 4 的比例，且最小通道大于 0、三通道之和为完全平方数 | mythic | 18 | 1.07e-6 | 93,206,756 | — |
+| math-triangular-trinity | 三角三连 | R、G、B 三个数均为三角数（0,1,3,6,10,15,21,28,...） | epic | 12,167 | 7.25e-4 | 137,891 | — |
+| math-catalan-trinity | 加泰三连 | R、G、B 三个数均为加泰罗尼亚数（1,2,5,14,42,132） | anomaly | 216 | 1.29e-5 | 7,767,230 | — |
+| math-arithmetic-triad | 等差三数 | R、G、B 升序排列后构成公差为正的等差数列 | rare | 97,536 | 0.58% | 17,201 | — |
+| math-pythagorean-triad | 勾股三数 | R、G、B 升序排列后满足 a² + b² = c² | anomaly | 1,014 | 6.04e-5 | 1,654,558 | — |
+| math-sum-prime | 质数之和 | R + G + B 为质数 | common | 2,760,769 | 16.46% | 608 | — |
+| math-sum-perfect-square | 平方之和 | R + G + B 为完全平方数 | uncommon | 453,595 | 2.70% | 3,699 | — |
+| math-sum-fibonacci | 斐氏和 | R + G + B 为斐波那契数 | rare | 106,213 | 0.63% | 15,796 | — |
 
 ### perception — 感知
 
-- 条数：**8**
+- 条数：**12**
 - 代表色：`#FF6600`
 
 | id | 名称 | 判定条件 | 稀有度 | 命中数 | 概率 p | CP (ep) | group |
@@ -130,10 +154,14 @@
 | perception-violet-dream | 紫罗兰梦 | 色相 265°–295°，饱和度 ≥ 30，亮度 ≥ 15 | uncommon | 1,257,769 | 7.50% | 1,334 | — |
 | perception-neon-alarm | 霓虹警报 | 饱和度 ≥ 85，亮度 35–65 | common | 3,123,048 | 18.61% | 537 | — |
 | perception-void-paradox | 虚空悖论 | 亮度 ≤ 12 且饱和度 ≥ 95——极暗，却近乎全饱和 | rare | 17,748 | 0.11% | 94,530 | — |
+| perception-warm-tone | 暖色调 | HSL 色相落在 0°–60° 或 300°–360° | common | 5,625,216 | 33.53% | 298 | — |
+| perception-cool-tone | 冷色调 | HSL 色相落在 180°–270° | common | 4,218,071 | 25.14% | 398 | — |
+| perception-pastel | 粉彩色 | HSL 饱和度在 20–40，且亮度大于 70 | uncommon | 213,318 | 1.27% | 7,865 | — |
+| perception-deep-jewel | 深宝色 | HSL 饱和度至少 60，且亮度在 25–45 之间 | common | 3,264,126 | 19.46% | 514 | — |
 
 ### pattern — 模式
 
-- 条数：**8**
+- 条数：**15**
 - 代表色：`#A5A5A5`
 
 | id | 名称 | 判定条件 | 稀有度 | 命中数 | 概率 p | CP (ep) | group |
@@ -146,10 +174,17 @@
 | pattern-twin-peaks | 双子星 | R、G、B 中恰好有两个相等，第三个不同 | uncommon | 195,840 | 1.17% | 8,567 | — |
 | pattern-mirror-bytes | 首尾呼应 | R = B | rare | 65,536 | 0.39% | 25,600 | — |
 | pattern-half-loop | 半身回环 | HEX 的前三位字符与后三位字符完全相同（如 #ABCABC） | epic | 4,096 | 2.44e-4 | 409,600 | — |
+| pattern-alternating | 交错排列 | HEX 六个字符按 ABABAB 模式交替出现，且两种字符不同 | anomaly | 240 | 1.43e-5 | 6,990,507 | — |
+| pattern-palindrome-loop | 六字回文 | HEX 六个字符按 ABCCBA 模式镜像对称 | epic | 4,096 | 2.44e-4 | 409,600 | — |
+| pattern-triple-blocks | 三三分块 | HEX 前三位相同、后三位相同，两组不同（AAABBB） | anomaly | 240 | 1.43e-5 | 6,990,507 | — |
+| pattern-double-blocks | 二二二分块 | HEX 六个字符按 AABBCC 模式，每两位相同 | epic | 4,096 | 2.44e-4 | 409,600 | — |
+| pattern-rising-strict | 六符递升 | HEX 六个字符的十六进制值从左到右严格递增 | epic | 8,008 | 4.77e-4 | 209,506 | — |
+| pattern-falling-strict | 六符递降 | HEX 六个字符的十六进制值从左到右严格递减 | epic | 8,008 | 4.77e-4 | 209,506 | — |
+| pattern-no-triple | 无三重 | HEX 六个字符中没有任何一个字符出现三次及以上 | common | 15,644,160 | 93.25% | 107 | — |
 
 ### culture — 文化
 
-- 条数：**8**
+- 条数：**15**
 - 代表色：`#002FA7`
 
 | id | 名称 | 判定条件 | 稀有度 | 命中数 | 概率 p | CP (ep) | group |
@@ -162,10 +197,17 @@
 | culture-van-gogh-blue | 梵高星空蓝 | HEX 精确等于 #1B3B6F（梵高《星月夜》夜空蓝近似值） | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
 | culture-bamboo-green | 竹青 | HEX 精确等于 #789262（中国传统色「竹青」） | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
 | culture-rouge | 胭脂 | HEX 精确等于 #9D2933（中国传统色「胭脂」） | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
+| culture-facebook-blue | Facebook 蓝 | HEX 精确等于 #1877F2 | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
+| culture-instagram-pink | Instagram 粉 | HEX 精确等于 #E4405F | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
+| culture-whatsapp-green | WhatsApp 绿 | HEX 精确等于 #25D366 | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
+| culture-discord-blurple | Discord 紫 | HEX 精确等于 #5865F2 | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
+| culture-spotify-green | Spotify 绿 | HEX 精确等于 #1DB954 | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
+| culture-tiktok-pink | TikTok 粉 | HEX 精确等于 #FE2C55 | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
+| culture-youtube-red | YouTube 红 | HEX 精确等于 #FF0000 | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
 
 ### lucky — 玄学
 
-- 条数：**6**
+- 条数：**10**
 - 代表色：`#FFD700`
 
 | id | 名称 | 判定条件 | 稀有度 | 命中数 | 概率 p | CP (ep) | group |
@@ -176,10 +218,14 @@
 | lucky-sum-520 | 五二零同心 | R + G + B = 520（「我爱你」的谐音） | rare | 30,381 | 0.18% | 55,223 | — |
 | lucky-avoid-four | 避四纳八 | HEX 的 6 位十六进制数字中不含 4，且 8 至少出现两次 | uncommon | 634,145 | 3.78% | 2,646 | — |
 | lucky-golden-tone | 金玉满堂 | R = 255 且 G = 215 且 B = 0（正金 #FFD700） | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
+| lucky-triple-seven | 七连三 | HEX 中包含连续子串 "777" | epic | 15,616 | 9.31e-4 | 107,436 | — |
+| lucky-triple-nine | 九九归一 | HEX 中包含连续子串 "999" | epic | 15,616 | 9.31e-4 | 107,436 | — |
+| lucky-sum-555 | 五五五同心 | R + G + B = 555 | rare | 22,366 | 0.13% | 75,012 | — |
+| lucky-sum-666 | 六六六同心 | R + G + B = 666 | epic | 5,050 | 3.01e-4 | 332,222 | — |
 
 ### casino — 牌型
 
-- 条数：**12**
+- 条数：**16**
 - 代表色：`#C8102E`
 
 | id | 名称 | 判定条件 | 稀有度 | 命中数 | 概率 p | CP (ep) | group |
@@ -196,6 +242,10 @@
 | casino-straight-six | 六连顺 | HEX 的 6 个字符两两不同，且其点数恰为 6 个连续整数 | epic | 7,920 | 4.72e-4 | 211,834 | casino-sequence |
 | casino-royal | 皇家同花顺 | HEX 的 6 个字符恰为 A、B、C、D、E、F 各一次（点数 10–15 的六连顺） | anomaly | 720 | 4.29e-5 | 2,330,169 | casino-sequence |
 | casino-flush | 同花 | HEX 的 6 个字符全部落在 0–7（低半花色），或全部落在 8–F（高半花色） | uncommon | 524,288 | 3.13% | 3,200 | — |
+| casino-four-two | 四二组合 | HEX 六个字符恰好一个点数出现 4 次、另一个点数出现 2 次 | epic | 3,600 | 2.15e-4 | 466,034 | — |
+| casino-three-three | 三三同辉 | HEX 六个字符恰好两个点数各出现 3 次 | epic | 2,400 | 1.43e-4 | 699,051 | — |
+| casino-straight-pair | 顺子带对 | HEX 六个字符含 5 个互不相同的连续点数，且其中恰好一个点数重复一次 | rare | 21,600 | 0.13% | 77,672 | — |
+| casino-extreme-flush | 极端同花 | HEX 六个字符全部落在 0–3（极低半花），或全部落在 C–F（极高半花） | epic | 8,192 | 4.88e-4 | 204,800 | — |
 
 ## 取代组（supersession）
 

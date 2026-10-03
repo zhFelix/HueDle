@@ -1,5 +1,6 @@
 // family: channel — 代表色 #00FF00
 import type { BadgeDef } from '../types';
+import { maxChannel, minChannel } from './helpers';
 
 /**
  * channel（通道）家族：玩通道之间的「序」与「值域」，而非颜色本身。
@@ -57,5 +58,50 @@ export const channelBadges: BadgeDef[] = [
     description: 'R = 255 且 G = 0 且 B = 128',
     family: 'channel',
     check: color => color.r === 255 && color.g === 0 && color.b === 128,
+  },
+    {
+    id: 'channel-tight-spread',
+    name: '通道紧密',
+    description: 'R、G、B 三数的最大值与最小值之差不超过 10',
+    family: 'channel',
+    check: c => maxChannel(c) - minChannel(c) <= 10,
+  },
+  {
+    id: 'channel-wide-spread',
+    name: '通道广域',
+    description: 'R、G、B 三数的最大值与最小值之差至少为 240',
+    family: 'channel',
+    check: c => maxChannel(c) - minChannel(c) >= 240,
+  },
+  {
+    id: 'channel-mid-only',
+    name: '中间地带',
+    description: 'R、G、B 三数全部落在 100 到 150 之间（含）',
+    family: 'channel',
+    check: c =>
+      c.r >= 100 && c.r <= 150 &&
+      c.g >= 100 && c.g <= 150 &&
+      c.b >= 100 && c.b <= 150,
+  },
+  {
+    id: 'channel-far-apart',
+    name: '双峰远隔',
+    description: 'R、G、B 中最大值与最小值之差至少为 200，且相邻排序差都小于 200',
+    family: 'channel',
+    check: c => {
+      const nums = [c.r, c.g, c.b].sort((a, b) => a - b);
+      return (
+        nums[2] - nums[0] >= 200 &&
+        nums[1] - nums[0] < 200 &&
+        nums[2] - nums[1] < 200
+      );
+    },
+  },
+  {
+    id: 'channel-three-peaks',
+    name: '三峰齐高',
+    description: 'R、G、B 三数全部大于 200',
+    family: 'channel',
+    check: c => c.r > 200 && c.g > 200 && c.b > 200,
   },
 ];

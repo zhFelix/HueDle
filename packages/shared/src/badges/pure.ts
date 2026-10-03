@@ -52,4 +52,32 @@ export const pureBadges: BadgeDef[] = [
     family: 'pure',
     check: color => color.r === 255 && color.g === 0 && color.b === 255,
   },
+    {
+    id: 'pure-dim-red',
+    name: '暗赤',
+    description: 'HEX 精确等于 #800000（暗红 / 栗色）',
+    family: 'pure',
+    check: c => c.hex === '#800000',
+  },
+  {
+    id: 'pure-dim-green',
+    name: '暗绿',
+    description: 'HEX 精确等于 #008000',
+    family: 'pure',
+    check: c => c.hex === '#008000',
+  },
+  {
+    id: 'pure-dim-blue',
+    name: '暗蓝',
+    description: 'HEX 精确等于 #000080（海军蓝）',
+    family: 'pure',
+    check: c => c.hex === '#000080',
+  },
+  {
+    id: 'pure-dim-yellow',
+    name: '暗黄',
+    description: 'HEX 精确等于 #808000（橄榄色）',
+    family: 'pure',
+    check: c => c.hex === '#808000',
+  },
 ];

@@ -1,6 +1,7 @@
 // family: math — 代表色 #010101
 import type { BadgeDef, ColorInfo } from '../types';
 import {
+  channelSum,
   digitSum,
   gcd,
   isFibonacci,
@@ -96,5 +97,73 @@ export const mathBadges: BadgeDef[] = [
       const [a, b, c] = ascending(color.r, color.g, color.b);
       return a > 0 && b === 2 * a && c === 4 * a && isPerfectSquare(a + b + c);
     },
+  },
+    {
+    id: 'math-triangular-trinity',
+    name: '三角三连',
+    description: 'R、G、B 三个数均为三角数（0,1,3,6,10,15,21,28,...）',
+    family: 'math',
+    check: c => {
+      const isTri = (n: number) => {
+        const k = Math.round((Math.sqrt(8 * n + 1) - 1) / 2);
+        return (k * (k + 1)) / 2 === n;
+      };
+      return isTri(c.r) && isTri(c.g) && isTri(c.b);
+    },
+  },
+  {
+    id: 'math-catalan-trinity',
+    name: '加泰三连',
+    description: 'R、G、B 三个数均为加泰罗尼亚数（1,2,5,14,42,132）',
+    family: 'math',
+    check: c => {
+      const isCat = (n: number) =>
+        n === 1 || n === 2 || n === 5 || n === 14 || n === 42 || n === 132;
+      return isCat(c.r) && isCat(c.g) && isCat(c.b);
+    },
+  },
+  {
+    id: 'math-arithmetic-triad',
+    name: '等差三数',
+    description: 'R、G、B 升序排列后构成公差为正的等差数列',
+    family: 'math',
+    check: c => {
+      const nums = [c.r, c.g, c.b].sort((a, b) => a - b);
+      return nums[2] > nums[1] && nums[1] - nums[0] === nums[2] - nums[1];
+    },
+  },
+  {
+    id: 'math-pythagorean-triad',
+    name: '勾股三数',
+    description: 'R、G、B 升序排列后满足 a² + b² = c²',
+    family: 'math',
+    check: c => {
+      const nums = [c.r, c.g, c.b].sort((a, b) => a - b);
+      return (
+        nums[0] > 0 &&
+        nums[0] * nums[0] + nums[1] * nums[1] === nums[2] * nums[2]
+      );
+    },
+  },
+  {
+    id: 'math-sum-prime',
+    name: '质数之和',
+    description: 'R + G + B 为质数',
+    family: 'math',
+    check: c => isPrime(channelSum(c)),
+  },
+  {
+    id: 'math-sum-perfect-square',
+    name: '平方之和',
+    description: 'R + G + B 为完全平方数',
+    family: 'math',
+    check: c => isPerfectSquare(channelSum(c)),
+  },
+  {
+    id: 'math-sum-fibonacci',
+    name: '斐氏和',
+    description: 'R + G + B 为斐波那契数',
+    family: 'math',
+    check: c => isFibonacci(channelSum(c)),
   },
 ];

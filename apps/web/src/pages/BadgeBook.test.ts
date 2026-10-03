@@ -76,13 +76,12 @@ describe('BadgeBook 页面', () => {
   it('5. 未收集也出现：渲染 76 条，且未获得的卡片不含条件 / CP / 稀有度', async () => {
     const root = await mountBadgeBook();
 
-    // 76 条全部渲染（不是只渲染已收集的）。
+    // 全部渲染（不是只渲染已收集的）；条数从 shared 取，不写死。
     const items = root.querySelectorAll('[data-testid="badge-item"]');
     expect(items).toHaveLength(allBadges.length);
-    expect(items).toHaveLength(76);
     expect(root.querySelectorAll('[data-testid="family-section"]')).toHaveLength(10);
     // 空历史 → 全部未获得。
-    expect(root.querySelectorAll('[data-collected="false"]')).toHaveLength(76);
+    expect(root.querySelectorAll('[data-collected="false"]')).toHaveLength(allBadges.length);
 
     // 逐条断言：名称在，条件 / CP / 稀有度标签不在。
     for (const badge of allBadges) {
@@ -111,8 +110,8 @@ describe('BadgeBook 页面', () => {
 
     const root = await mountBadgeBook();
 
-    // 仍然 76 条。
-    expect(root.querySelectorAll('[data-testid="badge-item"]')).toHaveLength(76);
+    // 条数不变（仍渲染全部徽章）。
+    expect(root.querySelectorAll('[data-testid="badge-item"]')).toHaveLength(allBadges.length);
     expect(root.querySelectorAll('[data-collected="true"]')).toHaveLength(2);
 
     const sixKind = allBadges.find(badge => badge.id === 'casino-six-kind');

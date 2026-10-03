@@ -51,16 +51,29 @@ export const cultureBadges: Badge[] = composeAll(cultureDefs);
 export const luckyBadges: Badge[] = composeAll(luckyDefs);
 export const casinoBadges: Badge[] = composeAll(casinoDefs);
 
-/** 全项目徽章表（家族顺序固定，便于图鉴展示与快照测试）。 */
-export const allBadges: Badge[] = [
-  ...grayBadges,
-  ...extremeBadges,
-  ...pureBadges,
-  ...channelBadges,
-  ...mathBadges,
-  ...perceptionBadges,
-  ...patternBadges,
-  ...cultureBadges,
-  ...luckyBadges,
-  ...casinoBadges,
+/**
+ * 全项目**原始定义**（未注入定价），家族顺序固定。
+ *
+ * 枚举器必须用它，不能用 {@link allBadges}。
+ * 原因是一个**自举死锁**：`allBadges` 在模块加载期就会 `compose()`，而 `compose()`
+ * 对缺少定价的徽章直接抛错——可「生成定价」的 `enumerate` 命令恰恰也需要先加载徽章表。
+ * 于是新增徽章后：要定价 → 得跑 enumerate → 得加载表 → 表说没有定价 → 跑不了。
+ *
+ * 实测踩过：一次加了 50 条徽章，`pnpm run enumerate` 直接以
+ * `徽章 "gray-multiple-16" 缺少定价数据` 失败，且提示的正是这条跑不起来的命令。
+ */
+export const allBadgeDefs: BadgeDef[] = [
+  ...grayDefs,
+  ...extremeDefs,
+  ...pureDefs,
+  ...channelDefs,
+  ...mathDefs,
+  ...perceptionDefs,
+  ...patternDefs,
+  ...cultureDefs,
+  ...luckyDefs,
+  ...casinoDefs,
 ];
+
+/** 全项目徽章表（含派生定价），家族顺序固定，便于图鉴展示与快照测试。 */
+export const allBadges: Badge[] = allBadgeDefs.map(compose);

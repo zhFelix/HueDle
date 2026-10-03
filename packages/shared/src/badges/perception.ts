@@ -62,4 +62,32 @@ export const perceptionBadges: BadgeDef[] = [
     family: 'perception',
     check: color => color.hsl.l <= 12 && color.hsl.s >= 95,
   },
+    {
+    id: 'perception-warm-tone',
+    name: '暖色调',
+    description: 'HSL 色相落在 0°–60° 或 300°–360°',
+    family: 'perception',
+    check: c => c.hsl.h <= 60 || c.hsl.h >= 300,
+  },
+  {
+    id: 'perception-cool-tone',
+    name: '冷色调',
+    description: 'HSL 色相落在 180°–270°',
+    family: 'perception',
+    check: c => c.hsl.h >= 180 && c.hsl.h <= 270,
+  },
+  {
+    id: 'perception-pastel',
+    name: '粉彩色',
+    description: 'HSL 饱和度在 20–40，且亮度大于 70',
+    family: 'perception',
+    check: c => c.hsl.s >= 20 && c.hsl.s <= 40 && c.hsl.l > 70,
+  },
+  {
+    id: 'perception-deep-jewel',
+    name: '深宝色',
+    description: 'HSL 饱和度至少 60，且亮度在 25–45 之间',
+    family: 'perception',
+    check: c => c.hsl.s >= 60 && c.hsl.l >= 25 && c.hsl.l <= 45,
+  },
 ];

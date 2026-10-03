@@ -9,7 +9,7 @@
  * - 近灰窄带要求极差 ≥ 1，因此不包含任何严格灰，不是 gray-true-monochrome 的子集。
  */
 import type { BadgeDef, ColorInfo } from '../types';
-import { maxChannel, minChannel } from './helpers';
+import { isGray, isPalindromeNumber, isPowerOfTwo, isPrime, maxChannel, minChannel } from './helpers';
 
 // private：三通道极差（max − min），仅本文件内部使用
 const spread = (c: ColorInfo): number => maxChannel(c) - minChannel(c);
@@ -56,5 +56,33 @@ export const grayBadges: BadgeDef[] = [
     description: '三通道极差 = 3，且最小值 = 128',
     family: 'gray',
     check: c => spread(c) === 3 && minChannel(c) === 128,
+  },
+    {
+    id: 'gray-multiple-16',
+    name: '十六分灰',
+    description: 'R = G = B 且该值是 16 的倍数',
+    family: 'gray',
+    check: c => isGray(c) && c.r % 16 === 0,
+  },
+  {
+    id: 'gray-binary-power',
+    name: '灰之幂',
+    description: 'R = G = B 且该值是 2 的正整数次幂',
+    family: 'gray',
+    check: c => isGray(c) && c.r > 0 && isPowerOfTwo(c.r),
+  },
+  {
+    id: 'gray-palindrome',
+    name: '灰之回文',
+    description: 'R = G = B 且该值是回文数',
+    family: 'gray',
+    check: c => isGray(c) && isPalindromeNumber(c.r),
+  },
+  {
+    id: 'gray-prime',
+    name: '灰之质数',
+    description: 'R = G = B 且该值是质数',
+    family: 'gray',
+    check: c => isGray(c) && isPrime(c.r),
   },
 ];
