@@ -7,7 +7,7 @@
  *   - `sqlite_master` 换成 `pg_tables`，并显式限定在测试 schema `huedle_test` 内。
  */
 import { describe, expect, it, vi } from 'vitest';
-import { createApp } from '../app';
+import { allowedOriginsFromEnv, createApp } from '../app';
 import { Store } from '../db';
 import { SlidingWindowRateLimiter } from '../lib/rateLimit';
 import { makeHarness, postJson, registerUser, TEST_PASSWORD, TEST_RATE_LIMIT } from './helpers';
@@ -158,6 +158,42 @@ describe('CORS', () => {
     expect(old.headers.get('access-control-allow-origin')).toBeNull();
   });
 });
+
+  it('浏览器会把主机名小写化——白名单写大写也必须匹配（实测踩过的坑）', async () => {
+    // 页面地址写 https://zhFelix.github.io，但浏览器序列化 Origin 时强制小写。
+    // 白名单若原样保存大写，就永远匹配不上，CORS 头不下发，浏览器一律拦截；
+    // 而 curl 原样发送字符串，测出来是通的 —— 所以这个 bug 只在真浏览器里复现。
+    const { app } = await makeHarness({ allowedOrigins: ['https://zhFelix.github.io'] });
+
+    const lower = await app.request('/api/health', {
+      headers: { origin: 'https://zhfelix.github.io' },
+    });
+    expect(lower.headers.get('access-control-allow-origin')).toBe('https://zhfelix.github.io');
+
+    // 反向也要成立：白名单小写、请求头大写（非浏览器客户端）
+    const { app: app2 } = await makeHarness({ allowedOrigins: ['https://zhfelix.github.io'] });
+    const upper = await app2.request('/api/health', {
+      headers: { origin: 'https://zhFelix.github.io' },
+    });
+    expect(upper.headers.get('access-control-allow-origin')).toBe('https://zhFelix.github.io');
+  });
+
+  it('大小写归一化不会把不该放行的来源放进来', async () => {
+    const { app } = await makeHarness({ allowedOrigins: ['https://zhFelix.github.io'] });
+    for (const bad of ['https://zhfelix.github.io.evil.com', 'https://evil.com', 'http://zhfelix.github.io']) {
+      const res = await app.request('/api/health', { headers: { origin: bad } });
+      expect(res.headers.get('access-control-allow-origin'), bad).toBeNull();
+    }
+  });
+
+  it('allowedOriginsFromEnv 会把白名单规范化（小写、去尾斜杠）', () => {
+    expect(allowedOriginsFromEnv({ HUEDLE_ORIGIN: 'https://zhFelix.github.io/' })).toEqual([
+      'https://zhfelix.github.io',
+    ]);
+    expect(
+      allowedOriginsFromEnv({ HUEDLE_ORIGIN: 'https://A.example, http://B.example:8080/' }),
+    ).toEqual(['https://a.example', 'http://b.example:8080']);
+  });
 
 describe('请求体上限与错误信封', () => {
   it('超大请求体 → 413 结构化 JSON', async () => {

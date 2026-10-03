@@ -29,13 +29,31 @@ export const DEFAULT_ALLOWED_ORIGINS = [
 /** 请求体上限：认证请求只有两个短字段，16KB 已经非常宽松。 */
 export const DEFAULT_BODY_LIMIT_BYTES = 16 * 1024;
 
+/**
+ * 规范化一个来源，用于**比较**。
+ *
+ * 为什么要小写：浏览器序列化 `Origin` 时会把主机名统一小写——这是 URL 规范的强制行为，
+ * 页面地址写 `https://zhFelix.github.io`，发出的请求头也是 `https://zhfelix.github.io`。
+ *
+ * 实测踩过：`HUEDLE_ORIGIN` 里写了大写的 `F`，于是白名单**永远匹配不上**，
+ * CORS 头不下发，浏览器一律拦截。而用 curl 测却是通的——因为 curl 原样发送你给的字符串，
+ * 不会做规范化。这类"只在真浏览器里复现"的配置错误极难查，所以在这里一次性消化掉：
+ * 白名单和请求头**两边都规范化后再比**，写大写小写都能用。
+ *
+ * 来源只由 `scheme://host:port` 构成（没有路径），三段都是大小写无关的，整体小写是安全的。
+ */
+export function normalizeOrigin(value: string): string {
+  return value.trim().replace(/\/+$/, '').toLowerCase();
+}
+
 export function allowedOriginsFromEnv(env: NodeJS.ProcessEnv = process.env): string[] {
   const raw = env.HUEDLE_ORIGIN?.trim();
   if (!raw) return [...DEFAULT_ALLOWED_ORIGINS];
   const origins = raw
     .split(',')
     .map(s => s.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .map(normalizeOrigin);
   return origins.length > 0 ? origins : [...DEFAULT_ALLOWED_ORIGINS];
 }
 
@@ -68,10 +86,15 @@ export function createApp(options: CreateAppOptions): Hono<AppEnv> {
 
   const app = new Hono<AppEnv>();
 
+  // 两边都规范化后再比，并且把**原始请求头**回给浏览器
+  // （浏览器拿自己发出去的那个值来比对，所以回原始值最稳）。
+  const allowedOriginSet = new Set(allowedOrigins.map(normalizeOrigin));
+
   app.use(
     '*',
     cors({
-      origin: allowedOrigins,
+      origin: (requestOrigin: string) =>
+        allowedOriginSet.has(normalizeOrigin(requestOrigin)) ? requestOrigin : undefined,
       allowHeaders: ['Content-Type', 'Authorization'],
       allowMethods: ['GET', 'POST', 'OPTIONS'],
       maxAge: 600,
