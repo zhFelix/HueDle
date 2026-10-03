@@ -180,16 +180,29 @@ pnpm -C packages/shared run docs           # 重新生成 docs/BADGES.md
 `db.<ref>.supabase.co` 是 **IPv6-only**。你本机有 IPv6 所以本地能连，但 Railway 的出口不一定有。
 pooler 是 IPv4。地址在 Supabase 控制台 → **Connect** → **Session pooler**。
 
-但 pooler 还有个前提要先验：**API 启动时会 `SHOW extra_float_digits`，不等于 1 就拒绝启动**
-（Supabase 默认 0，会让 `cp` 丢精度）。这个参数靠连接串的 `options` 下发：
+连接池曾有个会**直接导致服务起不来**的问题，已经解决，但机制值得记下来：
 
-| 连接方式 | 端口 | `options` 是否生效 |
-|---|---|---|
-| 直连 | 5432 | ✅ |
-| **Session pooler** | **5432** | 需实测（session 模式应透传） |
-| Transaction pooler | 6543 | ❌ 一定忽略，**用不了** |
+`extra_float_digits = 1` 原本是通过 libpq 的 `options` 启动参数下发的。
+**Supabase 的 Supavisor 连接池会把 `options` 整个吃掉**——实测：
 
-自检不过时服务会**明确报错退出**，而不是悄悄降级——所以试一次就知道能不能用。
+| 连接方式 | 端口 | 靠 `options` 时 | float8 精度 |
+|---|---|---|---|
+| 直连 | 5432 | `1` ✅ | 完整 |
+| Session pooler | 5432 | **`0` ❌** | **丢失** |
+| Transaction pooler | 6543 | **`0` ❌** | **丢失** |
+
+而 API 启动时会 `SHOW extra_float_digits`，不等于 1 就**拒绝启动**——
+所以早期版本在连接池后面是起不来的。
+
+**修法**：不再只依赖启动参数，改成连接建立后主动 `SET extra_float_digits = 1`
+（见 `apps/api/src/db/index.ts` 的 `sessionSetupSql`）。实测三种方式全部生效且稳定。
+
+安全性依据不是"应该能行"：`pg-pool` 的 `_acquireClient()` 里 `emit('connect', client)`
+是**同步**触发的，发生在连接交给调用方**之前**；`pg` 的 Client 按队列顺序发送查询。
+所以那条 `SET` 一定排在任何业务查询之前。这一点有专门的测试锁着。
+
+> 直连仍然更好（少一层代理、少一次往返），所以能开 Railway 的 outbound IPv6 就优先用直连。
+> 但连接池现在**不再是禁区**了。
 
 **② `HUEDLE_TRUST_PROXY=1` 必须设，否则限流会误伤所有人**
 

@@ -34,11 +34,47 @@ const IDENT_RE = /^[a-z_][a-z0-9_]*$/;
  * 某些托管 Postgres（实测 Supabase）把该 GUC 设成 `0`，float8 的文本输出只有 15 位有效数字，
  * `cp`（`ep` 之和的浮点值）从库里读回来就与 `@huedle/shared` 的 `calculateScore` 不再逐位相等。
  * 置 1 后 PG12+ 用最短且精确的十进制表示，double 往返无损。
- *
- * 通过 libpq 的 `options` 启动参数下发；`assertConnectivity()` 会验证它真的生效
- * （连接池代理 pgbouncer 会忽略 `options`，那时必须显式失败而不是悄悄丢精度）。
  */
 export const FLOAT_DIGITS_OPTION = '-c extra_float_digits=1';
+
+/**
+ * 会话参数初始化语句。**这是让 `extra_float_digits` 生效的主路径。**
+ *
+ * 为什么不能只靠 `options` 启动参数：Supabase 的 Supavisor 连接池**会把 `options` 整个吃掉**。
+ * 实测（ap-southeast-2 池子）：
+ *
+ *   | 连接方式            | 端口 | 靠 options | 精度     |
+ *   |---------------------|------|------------|----------|
+ *   | 直连                | 5432 | 1 ✅       | 完整     |
+ *   | Session pooler      | 5432 | 0 ❌       | 丢失     |
+ *   | Transaction pooler  | 6543 | 0 ❌       | 丢失     |
+ *
+ * 而**连上之后再 `SET`，三种方式都生效且稳定**（同一实测里连续 6 次查询取值不变）。
+ *
+ * 安全性依据：`pg-pool` 在 `_acquireClient()` 里**同步** `emit('connect', client)`，
+ * 发生在 `client.release` 赋值、连接交给调用方**之前**；而 `pg` 的 Client 按队列顺序发送查询。
+ * 所以这里排进去的 `SET` 一定排在任何业务查询之前——不是碰运气。
+ */
+export function sessionSetupSql(searchPath?: string): string {
+  const statements = ['SET extra_float_digits = 1'];
+  if (searchPath !== undefined) {
+    // searchPath 已由 IDENT_RE 校验为合法标识符，不含引号/分号，可安全内插。
+    statements.push(`SET search_path = ${searchPath}`);
+  }
+  return statements.join('; ');
+}
+
+/**
+ * 在一条已建立的连接上应用会话参数。
+ *
+ * 导出是为了让测试能**在不带 `options` 的连接**上直接验证——那正是模拟连接池的场景。
+ */
+export async function applySessionParams(
+  client: { query: (sql: string) => Promise<unknown> },
+  searchPath?: string,
+): Promise<void> {
+  await client.query(sessionSetupSql(searchPath));
+}
 
 /**
  * 建连接池。**不**发起任何查询（`pg` 是惰性连接）。
@@ -61,11 +97,28 @@ export function createPool(connectionString: string, options: CreatePoolOptions 
     sessionOptions.push(`-c search_path=${searchPath}`);
   }
 
-  return new Pool({
+  const pool = new Pool({
     connectionString: trimmed,
     max,
+    // `options` 在直连时生效，在连接池后面会被忽略。留着它没坏处（直连能少一次往返），
+    // 但**不能只靠它**——真正的保证是下面 connect 事件里的 SET。
     options: sessionOptions.join(' '),
   });
+
+  // 每条新连接建立后立刻应用会话参数。
+  //
+  // 刻意不 await：该事件在 pg-pool 里是同步触发的，且**早于连接被交出去**；
+  // pg 的 Client 会把这条查询排进队列，因此它一定先于任何业务查询执行。
+  // 在这里 await 反而会触发 pg 不支持的用法（客户端正在执行查询时再 query）。
+  pool.on('connect', (client) => {
+    void applySessionParams(client, searchPath).catch((err: unknown) => {
+      // 不静默：会话参数没设上就意味着 cp 会丢精度。启动自检能兜住首条连接，
+      // 但运行期新开的连接只有这条日志能提示。
+      console.warn('[huedle-api] 会话参数初始化失败（cp 可能丢精度）：', err);
+    });
+  });
+
+  return pool;
 }
 
 /** 启动自检：连不上、或会话参数没生效就抛，让调用方明确报错退出，而不是带着坏连接继续跑。 */
@@ -77,7 +130,8 @@ export async function assertConnectivity(pool: Pool): Promise<void> {
   if (digits !== '1') {
     throw new Error(
       `会话参数 extra_float_digits 未生效（实际为 "${digits}"）：cp 会丢精度，拒绝启动。` +
-        '通常是连接串指向了 pgbouncer/连接池（端口 6543），请改用直连端口 5432。',
+        'createPool() 会在每条新连接上执行 SET extra_float_digits = 1；' +
+        '若这里仍然失败，说明连接被某种代理改写、或该 SET 被拒绝，请检查 DATABASE_URL。',
     );
   }
 }
