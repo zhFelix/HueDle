@@ -1,0 +1,55 @@
+# Docker 构建上下文排除项。
+#
+# ⚠️ 两条容易踩的坑，改动前先读：
+#
+# 1. **排除 `.env`**。镜像层可以被任何人 pull 下来解开，把数据库连接串打进去
+#    等于把密码公开。凭据由部署平台用环境变量注入（Railway 的 Variables 面板），
+#    本地 `docker run` 用 `--env-file` 或 `-e`。
+#
+# 2. **不要把整个 `apps/web` 排除掉**。`.dockerignore` 对 `COPY` 同样生效，
+#    而 Dockerfile 里显式 `COPY apps/web/package.json`；更重要的是 pnpm 在
+#    workspace 里执行 `install --frozen-lockfile` 时，需要**每个**包的
+#    package.json 才能对齐 lockfile，少一个就会失败。
+#    所以这里只排除它的源码与产物，保留清单文件。
+
+# ── 凭据（最重要） ───────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── 依赖与产物：镜像里会重新装 ──────────────────────────────
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+
+# pnpm 的内容寻址存储（可能有好几 GB，且路径是绝对路径，复制进去没用）
+.pnpm-store
+**/.pnpm-store
+
+# ── 版本控制与 CI ───────────────────────────────────────────
+.git
+.gitignore
+.github
+
+# ── 前端源码：这个镜像只跑 API，前端在 GitHub Pages ─────────
+# 注意保留 apps/web/package.json（见文件顶部第 2 条）
+apps/web/src
+apps/web/public
+apps/web/index.html
+apps/web/vite.config.ts
+apps/web/vitest.config.ts
+apps/web/env.d.ts
+apps/web/tsconfig*.json
+
+# ── 开发期杂项 ─────────────────────────────────────────────
+*.log
+.DS_Store
+**/*.test.ts
+docs
+
+# ── 本地数据库残留（SQLite 时代的遗留物） ───────────────────
+*.db
+*.db-journal
+*.sqlite

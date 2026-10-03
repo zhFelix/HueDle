@@ -138,23 +138,71 @@ pnpm -C packages/shared run docs           # 重新生成 docs/BADGES.md
 3. **必须生成 `404.html`**：GitHub Pages 没有 SPA rewrite，直接访问 `/HueDle/me` 会 404。
    把 `index.html` 复制成 `404.html` 作为兜底，应用启动后由前端路由接管。
 
-### 后端 → 需要一台能跑 Node 的机器
+### 后端 → Railway（仓库根目录已有 `Dockerfile`）
 
-GitHub Pages 是纯静态托管，**后端必须放在别处**（Fly.io / Railway / Render 等）。
+1. Railway → **New Project** → **Deploy from GitHub repo** → 选 `HueDle`
+   （根目录有 `Dockerfile`，它会直接用它构建，不走自动检测）
 
-部署时设三个环境变量：
+2. **把区域设成与 Supabase 同区**（通常是 `us-east`）
+   > 这一条比看起来重要：一次请求有 1–3 次数据库查询，但只有一跳浏览器→API。
+   > 让多跳的那一段走局域网，整体快一倍以上。
 
-| 变量 | 说明 |
-|---|---|
-| `DATABASE_URL` | Postgres 连接串。**先用 Session pooler**：直连 `db.<ref>.supabase.co` 是 IPv6-only，不是每个平台都有 IPv6 出口 |
-| `HUEDLE_ORIGIN` | 允许的前端来源，例如 `https://<用户名>.github.io` |
-| `PORT` | 监听端口 |
+3. **Variables** 里设三个：
 
-然后在前端仓库里加一个 **Actions 变量**（Settings → Secrets and variables → Actions → Variables）：
+   | 变量 | 值 | 说明 |
+   |---|---|---|
+   | `DATABASE_URL` | Session pooler 连接串 | **别用直连**，见下面的坑 ① |
+   | `HUEDLE_ORIGIN` | `https://zhFelix.github.io` | CORS 白名单，不带结尾斜杠 |
+   | `HUEDLE_TRUST_PROXY` | `1` | **必须设**，见坑 ② |
 
-| 变量 | 值 |
-|---|---|
-| `API_BASE_URL` | 后端地址，**必须是 https**（页面是 https，混合内容会被浏览器拦掉） |
+   `PORT` 不用设——Railway 会注入，代码读的就是它。
+
+4. Settings → Networking → **Generate Domain**，拿到 `https://xxx.up.railway.app`
+
+5. **建表跑一次**（本地执行，用的是 Railway 的环境变量）：
+
+   ```bash
+   railway run pnpm -C apps/api migrate
+   ```
+
+6. 回到前端仓库，加一个 Actions 变量（**Settings → Secrets and variables → Actions → Variables**）：
+
+   | 变量 | 值 |
+   |---|---|
+   | `API_BASE_URL` | `https://xxx.up.railway.app`（**必须 https**） |
+
+   然后手动重跑一次 `Deploy web to GitHub Pages`。
+
+#### ⚠️ 三个部署时才会暴露的坑
+
+**① `DATABASE_URL` 要用 Session pooler，不能用直连**
+
+`db.<ref>.supabase.co` 是 **IPv6-only**。你本机有 IPv6 所以本地能连，但 Railway 的出口不一定有。
+pooler 是 IPv4。地址在 Supabase 控制台 → **Connect** → **Session pooler**。
+
+但 pooler 还有个前提要先验：**API 启动时会 `SHOW extra_float_digits`，不等于 1 就拒绝启动**
+（Supabase 默认 0，会让 `cp` 丢精度）。这个参数靠连接串的 `options` 下发：
+
+| 连接方式 | 端口 | `options` 是否生效 |
+|---|---|---|
+| 直连 | 5432 | ✅ |
+| **Session pooler** | **5432** | 需实测（session 模式应透传） |
+| Transaction pooler | 6543 | ❌ 一定忽略，**用不了** |
+
+自检不过时服务会**明确报错退出**，而不是悄悄降级——所以试一次就知道能不能用。
+
+**② `HUEDLE_TRUST_PROXY=1` 必须设，否则限流会误伤所有人**
+
+限流按客户端 IP 分桶（10 次/60 秒）。不信任 `X-Forwarded-For` 时，代码用的是
+**TCP 连接的来源地址**——而在 Railway 后面，那是**代理的地址**，对所有用户都一样。
+结果就是所有人挤在同一个桶里：第 11 个人登录就把全站挡住了。
+
+（反过来，只有确实跑在反向代理后面才该打开它。直连部署下任何客户端都能自己伪造
+`X-Forwarded-For`，无条件采信等于给限流留一个一行即破的后门——所以默认是关的。）
+
+**③ 前端是 https，后端也必须是 https**
+
+否则浏览器会以混合内容为由直接拦掉请求。Railway 生成的域名自带 TLS。
 
 > **后端没部署也能用**：本地模式完全不需要后端，站点依然是一个能完整游玩的游戏，只是登录模式会连不上。
 
