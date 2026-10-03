@@ -1,0 +1,65 @@
+name: Deploy web to GitHub Pages
+
+# 只部署**前端**。GitHub Pages 是纯静态托管，后端必须放在别处
+# （见 README 的「部署」一节）。
+#
+# 重要：本地模式**完全不需要后端**，所以即使后端还没部署，
+# 这个站点也是一个能完整游玩的游戏 —— 只是登录模式会连不上。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 构建（项目页在子路径下，必须设 base）
+        run: pnpm -C apps/web exec vite build --base=/HueDle/
+        env:
+          # 仓库变量，Settings → Secrets and variables → Actions → Variables
+          # 未设置时为空串，前端会退到默认的 localhost:3001，登录模式连不上，
+          # 但本地模式不受影响。
+          VITE_API_BASE: ${{ vars.API_BASE_URL }}
+
+      - name: 生成 SPA 回退页
+        # GitHub Pages 没有 SPA rewrite：直接访问 /HueDle/me 会 404。
+        # 把 index.html 复制成 404.html，Pages 就会用它对未知路径兜底，
+        # 应用启动后由前端路由接管（见 router.ts 的 createWebHistory）。
+        run: cp apps/web/dist/index.html apps/web/dist/404.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

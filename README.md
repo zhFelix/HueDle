@@ -101,6 +101,65 @@ pnpm -C packages/shared run docs           # 重新生成 docs/BADGES.md
 
 ---
 
+## CI
+
+`.github/workflows/ci.yml` 在每次 push 与 PR 上跑全部 323 个测试：
+
+| Job | 内容 |
+|---|---|
+| `shared + web` | shared 177 例、web 类型检查 + 173 例 + 构建 |
+| `api` | api 类型检查 + 52 例，**自带一个 Postgres 17 service 容器** |
+
+**不需要任何配置**，push 就会跑。它存在的意义不是"证明代码能跑"，而是让那些**一致性约束真的会被执行**：
+`docs/BADGES.md` 与代码是否同步、徽章定价与规则是否脱节、取代组是否合法、界面文案是否踩红线、
+登录模式是否污染了本地存储键。**没人跑的测试等于没有测试。**
+
+> 本地跑 `apps/api` 测试要 100 多秒（数据库在美东，每次查询跨洋 ~343ms）；
+> CI 里 Postgres 与 runner 同机，这一项会掉到几秒。
+
+## 部署
+
+### 前端 → GitHub Pages
+
+`.github/workflows/deploy-pages.yml` 会在 push 到 `main` 后自动构建并部署。**首次需要在仓库里开启**：
+
+> Settings → Pages → **Source** 选 **GitHub Actions**
+
+站点地址：`https://<用户名>.github.io/HueDle/`
+
+三个容易踩的坑，配置里都已经处理好了——改动时别弄丢：
+
+1. **必须设 `base`**：项目页在子路径下，构建要用 `vite build --base=/HueDle/`，
+   否则资源路径全错。
+2. **必须显式给路由传 base**：`createWebHistory(import.meta.env.BASE_URL)`。
+   `createWebHistory()` 不读 Vite 的 `base`（它只认 `<base href>` 标签），
+   不传就会**一条路由都匹配不上**——页面只剩导航外壳、内容空白，
+   而本地开发看不出任何问题。
+3. **必须生成 `404.html`**：GitHub Pages 没有 SPA rewrite，直接访问 `/HueDle/me` 会 404。
+   把 `index.html` 复制成 `404.html` 作为兜底，应用启动后由前端路由接管。
+
+### 后端 → 需要一台能跑 Node 的机器
+
+GitHub Pages 是纯静态托管，**后端必须放在别处**（Fly.io / Railway / Render 等）。
+
+部署时设三个环境变量：
+
+| 变量 | 说明 |
+|---|---|
+| `DATABASE_URL` | Postgres 连接串。**先用 Session pooler**：直连 `db.<ref>.supabase.co` 是 IPv6-only，不是每个平台都有 IPv6 出口 |
+| `HUEDLE_ORIGIN` | 允许的前端来源，例如 `https://<用户名>.github.io` |
+| `PORT` | 监听端口 |
+
+然后在前端仓库里加一个 **Actions 变量**（Settings → Secrets and variables → Actions → Variables）：
+
+| 变量 | 值 |
+|---|---|
+| `API_BASE_URL` | 后端地址，**必须是 https**（页面是 https，混合内容会被浏览器拦掉） |
+
+> **后端没部署也能用**：本地模式完全不需要后端，站点依然是一个能完整游玩的游戏，只是登录模式会连不上。
+
+---
+
 ## 文档
 
 | 文档 | 内容 |

@@ -1,0 +1,91 @@
+name: CI
+
+# 每次 push 与 PR 都跑。目的不是"证明代码能跑"，而是让那些**一致性约束**
+# 真的会被执行——docs 与代码是否同步、徽章定价是否与规则脱节、取代组是否合法、
+# 界面文案是否踩红线、登录模式是否污染了本地存储键。
+# 没人跑的测试等于没有测试。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一分支的旧运行在新 push 后取消，省额度。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── shared + web：纯内存，秒级 ───────────────────────────────────────────
+  test:
+    name: shared + web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # shared：177 例（含 docs/BADGES.md 一致性、徽章注册表、取代审计的纯函数部分）
+      - name: shared 测试
+        run: pnpm -C packages/shared test
+
+      # web：173 例（jsdom）；vue-tsc 会检查 .vue，别用 tsc
+      - name: web 类型检查
+        run: pnpm -C apps/web exec vue-tsc --noEmit
+
+      - name: web 测试
+        run: pnpm -C apps/web test
+
+      # 构建也一起验，避免"测试过了但打不出包"
+      - name: web 构建
+        run: pnpm -C apps/web build
+
+  # ── api：需要一个真实 Postgres ───────────────────────────────────────────
+  # 用 GitHub 的 service 容器，与 runner 同机 —— 查询是局域网速度，
+  # 不像本地开发那样每次跨洋 343ms（那会让这 52 个用例跑 146 秒）。
+  api:
+    name: api
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: huedle_ci
+        ports:
+          - 5432:5432
+        # 等数据库真的可连接，否则第一条查询会偶发失败
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # 测试夹具会自己建 huedle_test schema 并**拒绝**读写 public，所以这里
+      # 不需要跑 migrate。它还会自检 search_path 与 extra_float_digits=1，
+      # 参数没生效就报错而不是悄悄污染。
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/huedle_ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: api 类型检查
+        run: pnpm -C apps/api exec tsc --noEmit
+
+      - name: api 测试
+        run: pnpm -C apps/api test

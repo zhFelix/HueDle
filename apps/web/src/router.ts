@@ -18,6 +18,11 @@ export const routes: RouteRecordRaw[] = [
 ];
 
 export const router = createRouter({
-  history: createWebHistory(),
+  // **必须显式传 BASE_URL**：`createWebHistory()` 不读 Vite 的 `base`，
+  // 它只认 `<base href>` 标签，没有就退回 `'/'`。
+  // 部署到 GitHub Pages 的子路径（`/HueDle/`）时，不传这个参数会导致
+  // **一条路由都匹配不上**——页面只剩导航外壳、内容空白，
+  // 而本地开发（base 为 `/`）完全看不出问题。
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes,
 });
