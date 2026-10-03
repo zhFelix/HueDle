@@ -10,8 +10,14 @@
  *
  * | | 本地模式 | 登录模式 |
  * |---|---|---|
- * | 数据源 | `loadHistory()`（localStorage） | `GET /api/history`（服务端，已降序） |
+ * | 数据源 | `loadHistory()`（localStorage） | `huedle:history:user:<userId>` 缓存，未命中才 `GET /api/history` |
  * | 清空 | 有「清空本地记录」（保留匿名 ID） | **没有**本地记录可清，按钮不显示 |
+ *
+ * 登录模式的历史缓存（任务 C）：数据库在美东，一次 `GET /api/history` 约 740ms，
+ * 而历史在同一天内也会变（抽了今天的颜色就多一条）——所以缓存的**有效期是
+ * `day === utcDate()`**（跨天自然失效），并且**今日结果缓存一被写入，就由
+ * `useDailyColor` 连带清掉它**（见 `lib/storage.ts` 的耦合说明）。
+ * 忘记这个耦合就会出现「我明明抽了今天的，历史页却没有」。
  *
  * 统计口径（`totalDays` / `streak` / `bestCp` / `byRarity`）由**同一个**
  * {@link computeHistoryStats} 计算，两种模式只换数据源，不换算法。
@@ -27,6 +33,8 @@ import {
   clearLocalHistory,
   computeStreak,
   loadHistory,
+  loadUserHistory,
+  saveUserHistory,
   type HistoryItem,
 } from '../lib/storage';
 import { clearSessionOnUnauthorized, currentSession } from '../stores/session';
@@ -104,26 +112,39 @@ export function useHistory(options: UseHistoryOptions = {}): UseHistory {
   const canClear = computed(() => !isLoggedIn.value);
 
   /**
-   * 本地分支**同步**赋值：`entries` 在 `reload()` 返回前就更新完毕，
-   * 既有调用方（含测试）不需要 `await`。
+   * 本地分支与**缓存命中的登录分支**都同步赋值：`entries` 在 `reload()` 返回前
+   * 就更新完毕，既有调用方（含测试）不需要 `await`，命中缓存时也一个请求都不发。
    */
   function reload(): Promise<void> {
     error.value = null;
 
     const session = currentSession();
-    if (!session.isLoggedIn || session.token === null) {
+    if (!session.isLoggedIn || session.token === null || session.userId === null) {
       entries.value = loadHistory();
       return Promise.resolve();
     }
 
-    const token = session.token;
+    const { token, userId } = session;
+    const day = utcDate(options.date);
+
+    // ① 先读本账户本日的历史缓存：命中即渲染（0 请求）。
+    const cached = loadUserHistory(userId, day);
+    if (cached !== null) {
+      entries.value = cached;
+      return Promise.resolve();
+    }
+
+    // ② 未命中才走服务端，成功后写回缓存（有效期 = 这一天的 utcDate()）。
     isLoading.value = true;
     return (async () => {
       try {
-        entries.value = await getHistory(token);
+        const items = await getHistory(token);
+        entries.value = items;
+        saveUserHistory(userId, day, items);
       } catch (err) {
         if (isApiError(err) && err.status === 401) {
           // token 失效：回退本地模式并读回本地历史（本地数据从未被写过）。
+          // clearSessionOnUnauthorized 会连带清掉本账户的今日 / 历史缓存。
           clearSessionOnUnauthorized();
           entries.value = loadHistory();
         } else {

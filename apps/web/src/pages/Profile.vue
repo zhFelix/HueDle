@@ -1,10 +1,19 @@
 <script setup lang="ts">
 /**
- * 历史记录页。
+ * 个人主页（路由 `/me`，导航里的「我的」）。
  *
- * 数据来自 `useHistory()`：本地模式读 `huedle:history`，登录模式读服务端
- * `GET /api/history`，这里**不重算**任何分数——每条记录的日期 / 颜色 / CP / 稀有度
- * 都是抽到当天写下的原值，徽章列表由 `HistoryList` 在展开时按存档还原。
+ * 它就是原来的历史页——**没有重写，而是复用**：数据仍全部来自 `useHistory()`，
+ * 徽章列表仍由 `HistoryList` 在展开时按存档还原（不重跑 `check`、不重算分数）。
+ * 这里只是把「身份」和「历史」合到了一页，并把统计的主次调了一下。
+ *
+ * 三段：
+ *   ① 身份区——登录模式显示用户名 + 登出；本地模式显示「本地模式」+ 去登录的入口。
+ *      并说明两种模式抽到的是**不同的颜色**（DESIGN 第 11.5 节），这是玩家最容易
+ *      困惑的点：本地抽了今天再登录，看到的是账户身份的今日颜色，不是"多抽了一次"。
+ *   ② 统计区——主指标是**收集天数**（原来的「已记录天数」）；次要指标是当前连续、
+ *      最高 CP（含那天的日期）与稀有度分布。首页那个「连续天数」已经从首页移除，
+ *      累计天数只在这里出现。
+ *   ③ 颜色历史——复用 `HistoryList`（折叠 / 展开徽章 / 「同类更强」降级 / 今天标记）。
  *
  * 「清空本地记录」**只在本地模式显示**：登录模式没有本地记录可清（数据在服务端）。
  * 清空是两步：先在原地展开确认条，确认后才真的清（不用 `window.confirm`）。
@@ -17,7 +26,9 @@ import RarityBadge from '../components/RarityBadge.vue';
 import { useHistory } from '../composables/useHistory';
 import { RARITY_ORDER } from '../lib/rarity';
 import { formatCp } from '../lib/format';
+import { useSessionStore } from '../stores/session';
 
+const session = useSessionStore();
 const { entries, stats, isEmpty, canClear, isLoading, error, reload, clear } = useHistory();
 
 const isConfirmingClear = ref(false);
@@ -40,9 +51,48 @@ function confirmClear(): void {
 <template>
   <div class="space-y-6">
     <header>
-      <h1 class="text-2xl font-bold text-neutral-50">历史记录</h1>
-      <p class="mt-1 text-sm text-neutral-500">每一天抽到的颜色与得分，都按当天的结果原样保存。</p>
+      <h1 class="text-2xl font-bold text-neutral-50">我的</h1>
     </header>
+
+    <!-- ① 身份区 -->
+    <section
+      class="rounded-2xl border border-ink-700 bg-ink-900 p-4"
+      aria-label="当前身份"
+      data-testid="identity-section"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <template v-if="session.isLoggedIn">
+          <div>
+            <p class="text-xs uppercase tracking-widest text-neutral-500">登录模式</p>
+            <p class="mt-1 font-mono text-lg text-neutral-50">
+              {{ session.userName ?? session.userId }}
+            </p>
+          </div>
+          <button
+            type="button"
+            class="rounded-xl border border-ink-700 px-4 py-2 text-sm text-neutral-200 transition-colors hover:bg-ink-800"
+            @click="session.logout()"
+          >
+            登出
+          </button>
+        </template>
+
+        <template v-else>
+          <div>
+            <p class="text-xs uppercase tracking-widest text-neutral-500">本地模式</p>
+            <p class="mt-1 text-sm text-neutral-300">
+              登录后，颜色和历史在任何设备上都能看到。
+            </p>
+          </div>
+          <RouterLink
+            to="/login"
+            class="rounded-xl bg-ink-800 px-4 py-2 text-sm font-medium text-neutral-100 transition-colors hover:bg-ink-700"
+          >
+            登录 / 注册
+          </RouterLink>
+        </template>
+      </div>
+    </section>
 
     <!-- 读取失败：可重试的错误态，绝不白屏 -->
     <p
@@ -81,27 +131,33 @@ function confirmClear(): void {
     </section>
 
     <template v-else>
-      <!-- 统计条 -->
-      <section class="rounded-2xl border border-ink-700 bg-ink-900 p-4">
-        <dl class="grid grid-cols-3 gap-4">
+      <!-- ② 统计区：收集天数是主指标（首页已不再显示「连续天数」） -->
+      <section class="rounded-2xl border border-ink-700 bg-ink-900 p-4" data-testid="stats-section">
+        <div class="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <dt class="text-xs uppercase tracking-widest text-neutral-500">已记录天数</dt>
-            <dd class="mt-1 font-mono text-2xl text-neutral-100">{{ stats.totalDays }}</dd>
-          </div>
-          <div>
-            <dt class="text-xs uppercase tracking-widest text-neutral-500">当前连续</dt>
-            <dd class="mt-1 font-mono text-2xl text-neutral-100">
-              {{ stats.streak }}<span class="ml-1 text-sm text-neutral-500">天</span>
-            </dd>
-          </div>
-          <div>
-            <dt class="text-xs uppercase tracking-widest text-neutral-500">最高 CP</dt>
-            <dd class="mt-1 font-mono text-2xl text-neutral-100">{{ formatCp(stats.bestCp) }}</dd>
-            <p v-if="stats.bestEntry" class="mt-1 font-mono text-xs text-neutral-500">
-              {{ stats.bestEntry.date }}
+            <p class="text-xs uppercase tracking-widest text-neutral-500">收集天数</p>
+            <p class="mt-1 font-mono text-4xl font-bold text-neutral-50">
+              {{ stats.totalDays }}<span class="ml-1 text-base font-normal text-neutral-500">天</span>
             </p>
           </div>
-        </dl>
+          <dl class="flex flex-wrap gap-x-8 gap-y-3">
+            <div>
+              <dt class="text-xs uppercase tracking-widest text-neutral-500">当前连续</dt>
+              <dd class="mt-1 font-mono text-xl text-neutral-100">
+                {{ stats.streak }}<span class="ml-1 text-sm text-neutral-500">天</span>
+              </dd>
+            </div>
+            <div>
+              <dt class="text-xs uppercase tracking-widest text-neutral-500">最高 CP</dt>
+              <dd class="mt-1 font-mono text-xl text-neutral-100">
+                {{ formatCp(stats.bestCp) }}
+              </dd>
+              <p v-if="stats.bestEntry" class="mt-1 font-mono text-xs text-neutral-500">
+                {{ stats.bestEntry.date }}
+              </p>
+            </div>
+          </dl>
+        </div>
 
         <div
           v-if="distribution.length > 0"
@@ -119,7 +175,11 @@ function confirmClear(): void {
         </div>
       </section>
 
-      <HistoryList :entries="entries" />
+      <!-- ③ 颜色历史 -->
+      <section class="space-y-3" aria-label="颜色历史">
+        <h2 class="text-xs uppercase tracking-widest text-neutral-500">颜色历史</h2>
+        <HistoryList :entries="entries" />
+      </section>
 
       <!-- 底部：低强调的清空入口 + 就地二次确认（登录模式没有本地记录可清，整块不显示） -->
       <section v-if="canClear" class="border-t border-ink-800 pt-4">

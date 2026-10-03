@@ -87,7 +87,7 @@ async function handleLogout(): Promise<void> {
     <header>
       <h1 class="text-2xl font-bold text-neutral-50">登录</h1>
       <p class="mt-1 text-sm text-neutral-500">
-        登录后使用账户身份的每日颜色，历史记录保存在服务端，跨设备一致。
+        登录后，颜色和历史在任何设备上都能看到。
       </p>
     </header>
 
@@ -189,19 +189,6 @@ async function handleLogout(): Promise<void> {
           {{ isSubmitting ? '提交中…' : submitLabel }}
         </button>
       </form>
-
-      <!-- §11.5：登录时的行为约定，必须让用户看见 -->
-      <section
-        class="space-y-2 rounded-2xl border border-dashed border-ink-700 bg-ink-900/40 p-6 text-sm text-neutral-400"
-      >
-        <p class="font-medium text-neutral-300">关于两种模式</p>
-        <p>本地记录不会并入账户——两种模式抽到的是不同的颜色。</p>
-        <p>每个身份每天一次；切换身份，就是切换到该身份对应的那一次。</p>
-        <p class="text-xs text-neutral-500">
-          也就是说：本地抽了今天再登录，会看到账户身份的今日颜色。那不是「多抽了一次」，
-          而是两个身份各自的今日颜色。登出后本地数据原样恢复。
-        </p>
-      </section>
     </template>
   </div>
 </template>

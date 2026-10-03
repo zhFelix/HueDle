@@ -3,7 +3,8 @@
  * 今日取色（垂直切片）。
  *
  * 三段式流程：
- *   - `closed`  今天还没点 → 只有标题 / 连续天数 / 按钮，不透露颜色、CP、稀有度、徽章；
+ *   - `closed`  今天还没点 → 只有标题 / 按钮，不透露颜色、CP、稀有度、徽章；
+ *     （累计统计只在「我的」页展示，首页不再显示）
  *   - `rolling` 点了 → 播放老虎机揭晓动画，背景跟随滚动中的 HEX；
  *   - `done`    动画停稳 / 今天已抽过（刷新）→ 淡入完整结果。
  *
@@ -24,8 +25,8 @@ import { formatCp } from '../lib/format';
 
 type Phase = 'closed' | 'rolling' | 'done';
 
-const { result, color, historyItem, streak, isLoading, revealed, error, load, reveal } =
-  useDailyColor();
+// 注意：这里**不取 `streak`** —— 累计统计只在「我的」页展示，首页不再显示。
+const { result, color, historyItem, isLoading, revealed, error, load, reveal } = useDailyColor();
 
 const phase = ref<Phase>('closed');
 /** 滚动中的 HEX（由 HexRoller 通过 v-model 抛出），仅用于背景跟随。 */
@@ -76,15 +77,9 @@ async function handleSettled(): Promise<void> {
   <AmbientBackdrop :hex="ambientHex" />
 
   <div class="space-y-6">
-    <header class="flex flex-wrap items-end justify-between gap-3">
-      <div>
-        <h1 class="text-2xl font-bold text-neutral-50">今日一色</h1>
-        <p class="mt-1 text-sm text-neutral-500">每天 00:00 UTC 换新色。</p>
-      </div>
-      <div class="text-right">
-        <p class="text-xs uppercase tracking-widest text-neutral-500">连续天数</p>
-        <p class="font-mono text-2xl text-neutral-100">{{ streak }}</p>
-      </div>
+    <header>
+      <h1 class="text-2xl font-bold text-neutral-50">今日一色</h1>
+      <p class="mt-1 text-sm text-neutral-500">每天 00:00 UTC 换新色。</p>
     </header>
 
     <!-- 揭晓完成时播报一次（滚动期间不更新，避免刷屏） -->

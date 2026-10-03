@@ -10,7 +10,14 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, isApiError } from '../lib/api';
-import { STORAGE_KEYS, loadIdentity, saveUserDaily, userDailyKey } from '../lib/storage';
+import {
+  STORAGE_KEYS,
+  loadIdentity,
+  loadUserHistory,
+  saveUserDaily,
+  saveUserHistory,
+  userDailyKey,
+} from '../lib/storage';
 import { apiErrorReply, installFetchMock } from '../test-utils/mock-fetch';
 import { useSessionStore, clearSessionOnUnauthorized } from './session';
 
@@ -320,5 +327,27 @@ describe('身份缓存 huedle:identity — 只用于显示，不参与授权', (
     expect(localStorage.getItem(STORAGE_KEYS.identity)).toBeNull();
     expect(localStorage.getItem(userDailyKey('u1'))).toBeNull();
     expectLocalDataIntact(seeded);
+  });
+
+  it('logout() 连带清掉本账户的历史缓存（与今日缓存一起），别的账户不受影响', async () => {
+    localStorage.setItem(STORAGE_KEYS.token, 'tok-alice');
+    seedIdentity('u1', 'Alice');
+    saveUserDaily('u1', CACHED_DAILY, 3);
+    saveUserHistory('u1', '2026-03-04', [CACHED_DAILY]);
+    saveUserHistory('u2', '2026-03-04', [CACHED_DAILY]);
+    installFetchMock(call =>
+      call.url.endsWith('/api/auth/me')
+        ? { body: { id: 'u1', name: 'Alice' } }
+        : { status: 204 },
+    );
+
+    const store = useSessionStore();
+    await store.hydrate();
+    await store.logout();
+
+    expect(localStorage.getItem(userDailyKey('u1'))).toBeNull();
+    expect(loadUserHistory('u1', '2026-03-04')).toBeNull();
+    // 只清本账户的，别的账户的历史缓存不动
+    expect(loadUserHistory('u2', '2026-03-04')).not.toBeNull();
   });
 });

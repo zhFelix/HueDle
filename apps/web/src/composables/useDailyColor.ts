@@ -54,6 +54,7 @@ import { getDaily, isApiError } from '../lib/api';
 import { getLocalIdentity } from '../lib/identity';
 import {
   clearUserDaily,
+  clearUserHistory,
   computeStreak,
   isHistoryItem,
   isRevealedToday,
@@ -263,7 +264,16 @@ export function useDailyColor(options: UseDailyColorOptions = {}): UseDailyColor
 
     const streakValue = readStreak(item);
     applyResult(item, itemColor, streakValue, userId, day);
+
+    // 今日结果落盘 → **连带清掉这个账户的历史缓存**。
+    //
+    // 理由（必须记住的耦合）：历史每天新增一条，但**同一天内也会变**——
+    // 玩家先打开「我的」看了历史，再回今日页抽了今天的颜色，历史就多了一条。
+    // 不清的话，回到「我的」会命中上午缓存下来的那份旧历史，出现
+    // 「我明明抽了今天的，历史页却没有」。这种 bug 最容易被发现、也最难复现
+    // （必须"先看历史、再抽色"这个顺序）。清掉后下次打开「我的」会重新请求。
     saveUserDaily(userId, item, streakValue);
+    clearUserHistory(userId);
   }
 
   async function load(): Promise<void> {

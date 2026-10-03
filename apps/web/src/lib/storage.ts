@@ -46,11 +46,25 @@ export const STORAGE_KEYS = {
    * 登录模式只写这个前缀下的键，登出后本地数据原样恢复（DESIGN 11.3）。
    */
   userDailyPrefix: 'huedle:daily:user:',
+  /**
+   * 登录模式历史缓存的前缀。完整 key 为 `huedle:history:user:<userId>`，
+   * 按用户分键，因此同一天切换账户不会串味。
+   *
+   * ⚠️ 它与本地模式专属的 `huedle:history` **不是同一个 key**：登录模式只写这个
+   * 前缀下的键，本地历史（裸数组）永远不被登录模式碰（DESIGN 11.3）。
+   * 缓存内容形如 `{ day, items }`，`day` 用 `utcDate()` 判定有效期（跨天自然失效）。
+   */
+  userHistoryPrefix: 'huedle:history:user:',
 } as const;
 
 /** 登录模式今日结果缓存的完整 key：`huedle:daily:user:<userId>`。 */
 export function userDailyKey(userId: string): string {
   return `${STORAGE_KEYS.userDailyPrefix}${userId}`;
+}
+
+/** 登录模式历史缓存的完整 key：`huedle:history:user:<userId>`。 */
+export function userHistoryKey(userId: string): string {
+  return `${STORAGE_KEYS.userHistoryPrefix}${userId}`;
 }
 
 /** 当前写入版本。读取时 `v !== STORAGE_VERSION` 的记录一律丢弃。 */
@@ -363,8 +377,8 @@ export function clearUserDaily(userId: string): void {
   safeRemove(userDailyKey(userId));
 }
 
-/** 删掉**所有**账户的今日结果缓存（前缀扫描；`clearLocalData` 用）。 */
-function clearAllUserDaily(): void {
+/** 按前缀删掉所有键（前缀扫描；删之前先把 key 收集齐，避免边遍历边删）。 */
+function clearKeysWithPrefix(prefix: string): void {
   try {
     const storage = globalThis.localStorage;
     if (!storage) return;
@@ -372,12 +386,103 @@ function clearAllUserDaily(): void {
     const doomed: string[] = [];
     for (let i = 0; i < storage.length; i += 1) {
       const key = storage.key(i);
-      if (key !== null && key.startsWith(STORAGE_KEYS.userDailyPrefix)) doomed.push(key);
+      if (key !== null && key.startsWith(prefix)) doomed.push(key);
     }
     for (const key of doomed) storage.removeItem(key);
   } catch {
     /* 存储不可用：没有可清的东西 */
   }
+}
+
+/** 删掉**所有**账户的今日结果缓存（`clearLocalData` 用）。 */
+function clearAllUserDaily(): void {
+  clearKeysWithPrefix(STORAGE_KEYS.userDailyPrefix);
+}
+
+// ---------------------------------------------------------------------------
+// 登录模式的历史缓存（按用户分键）`huedle:history:user:<userId>`
+// ---------------------------------------------------------------------------
+//
+// ⚠️ **与 `huedle:daily:user:<userId>` 的耦合（最容易忘了的那种 bug）**
+//
+// 历史每天新增一条，但它**在同一天内也会变**：玩家先打开「我的」看到历史，
+// 回到今日页抽了今天的颜色，历史就多了一条。如果今日结果落盘（写
+// `huedle:daily:user:<userId>`）时不清掉历史缓存，就会出现
+// 「我明明抽了今天的，历史页却没有」——这种 bug 最容易被用户发现、
+// 却最难复现（要先看历史再抽色）。因此写入今日结果缓存的**那条路径**
+// 必须同时调用 {@link clearUserHistory}（见 `composables/useDailyColor.ts`）。
+
+/** 缓存内容：`{ day, items }`，`day` 是写入当天的 `utcDate()`。 */
+export interface UserHistoryRecord {
+  day: string;
+  items: HistoryItem[];
+}
+
+/**
+ * 读取某账户的历史缓存。
+ *
+ * 命中条件：key 存在、结构合法、且 `day === 传入的 day`（**跨天自然失效**，
+ * 不用时间戳 TTL——历史只按 UTC 天分组，天数对不上就必须回服务端）。
+ * 未命中 / 脏数据一律返回 `null`，绝不抛。
+ *
+ * 逐条校验与 `loadHistory()` 同口径：一条坏记录只丢它自己。
+ * 返回 `null` 表示"缓存不可用"，返回 `[]` 表示"缓存可用，服务端当时就是空历史"。
+ */
+export function loadUserHistory(userId: string, day: string): HistoryItem[] | null {
+  if (!userId) return null;
+
+  const parsed = parseJson(safeGet(userHistoryKey(userId)));
+  if (!isRecord(parsed)) return null;
+
+  const { v, day: cachedDay, items } = parsed;
+  if (v !== undefined && v !== STORAGE_VERSION) return null;
+  if (typeof cachedDay !== 'string' || !DATE_RE.test(cachedDay)) return null;
+  if (cachedDay !== day) return null;
+  if (!Array.isArray(items)) return null;
+
+  const seen = new Set<string>();
+  const valid: HistoryItem[] = [];
+  for (const entry of items) {
+    if (!isHistoryItem(entry)) continue;
+    if (seen.has(entry.date)) continue;
+    seen.add(entry.date);
+    valid.push(normalize(entry));
+  }
+
+  return valid.sort(compareDateDesc);
+}
+
+/**
+ * 写入某账户的历史缓存（覆盖式，只存这一份快照）。
+ *
+ * 与 `saveUserDaily` 一样是登录模式专属的 key，本地模式的 `huedle:history`
+ * 一个字节都不会被碰。
+ */
+export function saveUserHistory(userId: string, day: string, items: HistoryItem[]): void {
+  if (!userId || !DATE_RE.test(day) || !Array.isArray(items)) return;
+
+  const record = {
+    v: STORAGE_VERSION,
+    day,
+    items: items.filter(isHistoryItem).map(normalize).sort(compareDateDesc),
+  };
+  safeSet(userHistoryKey(userId), JSON.stringify(record));
+}
+
+/**
+ * 删掉某账户的历史缓存。
+ *
+ * **调用时机**：① `saveUserDaily` 的那条路径（今日结果一落盘，历史就多了一条，
+ * 缓存必须作废——见上方耦合说明）；② 登出 / 401 回退（与 `clearUserDaily` 一起）。
+ */
+export function clearUserHistory(userId: string): void {
+  if (!userId) return;
+  safeRemove(userHistoryKey(userId));
+}
+
+/** 删掉**所有**账户的历史缓存（`clearLocalData` 用）。 */
+function clearAllUserHistory(): void {
+  clearKeysWithPrefix(STORAGE_KEYS.userHistoryPrefix);
 }
 
 // ---------------------------------------------------------------------------
@@ -450,4 +555,5 @@ export function clearLocalData(): void {
   safeRemove(STORAGE_KEYS.revealed);
   safeRemove(STORAGE_KEYS.identity);
   clearAllUserDaily();
+  clearAllUserHistory();
 }

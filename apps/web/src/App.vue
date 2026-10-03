@@ -1,16 +1,15 @@
 <script setup lang="ts">
 /** 应用外壳：顶部导航 + 路由出口。 */
 import { computed, onMounted } from 'vue';
-import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router';
+import { RouterLink, RouterView, useRoute } from 'vue-router';
 import { useSessionStore } from './stores/session';
 
 const session = useSessionStore();
 const route = useRoute();
-const router = useRouter();
 
 const links = [
   { to: '/', label: '今日' },
-  { to: '/history', label: '历史' },
+  { to: '/me', label: '我的' },
   { to: '/badges', label: '图鉴' },
   { to: '/about', label: '关于' },
 ];
@@ -30,11 +29,6 @@ const currentTitle = computed(() => String(route.meta.title ?? 'HueDle'));
 onMounted(() => {
   void session.hydrate();
 });
-
-async function handleLogout(): Promise<void> {
-  await session.logout();
-  if (route.name === 'login') await router.push('/');
-}
 </script>
 
 <template>
@@ -49,23 +43,21 @@ async function handleLogout(): Promise<void> {
             {{ modeLabel }}
           </span>
 
-          <!-- 已登录：用户名 + 登出；未登录：登录链接 -->
-          <template v-if="isLoggedIn">
-            <span class="font-mono text-xs text-neutral-300">
-              {{ session.userName ?? session.userId }}
-            </span>
-            <button
-              type="button"
-              class="text-xs text-neutral-400 underline-offset-4 hover:text-neutral-100 hover:underline"
-              @click="handleLogout"
-            >
-              登出
-            </button>
-          </template>
+          <!--
+            身份管理（登出 / 登录入口）已移到「我的」页；头部只留一个明显的入口，
+            保证未登录的用户一眼能看到怎么登录，不会"找不到登录"。
+          -->
+          <RouterLink
+            v-if="isLoggedIn"
+            to="/me"
+            class="font-mono text-xs text-neutral-300 underline-offset-4 hover:text-neutral-100 hover:underline"
+          >
+            {{ session.userName ?? session.userId }}
+          </RouterLink>
           <RouterLink
             v-else
             to="/login"
-            class="text-xs text-neutral-400 underline-offset-4 hover:text-neutral-100 hover:underline"
+            class="rounded-full border border-amber-400/50 bg-amber-400/15 px-3 py-1 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-400/25"
           >
             登录
           </RouterLink>

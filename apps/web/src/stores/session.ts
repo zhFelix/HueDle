@@ -8,7 +8,8 @@
  * 1. **登录模式绝不碰本地模式的存储键**（`huedle:daily` / `huedle:history` /
  *    `huedle:streak`）。本 store 只写 `huedle:token` 与登录模式专属的
  *    `huedle:identity`，登录模式的结果写进 `huedle:daily:user:<userId>`（见
- *    `composables/useDailyColor.ts`），因此登出后本地数据原封不动（DESIGN 11.3）。
+ *    `composables/useDailyColor.ts`）、历史写进 `huedle:history:user:<userId>`
+ *    （见 `composables/useHistory.ts`），因此登出后本地数据原封不动（DESIGN 11.3）。
  * 2. **启动时必须用 token 向服务端核对身份**（`hydrate()`）。身份缓存
  *    `huedle:identity` 只用来让首屏**立刻**按登录模式渲染（不再等网络落地），
  *    它绝不参与授权判定：只要 token 在，`hydrate()` 就一定会调
@@ -31,6 +32,7 @@ import {
   STORAGE_KEYS,
   clearIdentity,
   clearUserDaily,
+  clearUserHistory,
   loadIdentity,
   saveIdentity,
 } from '../lib/storage';
@@ -115,8 +117,9 @@ export const useSessionStore = defineStore('session', () => {
    * 一律不动（DESIGN 11.3）。
    *
    * 清掉的只有**登录态缓存**：token、`huedle:identity`、以及本账户的
-   * `huedle:daily:user:<userId>`——token 都没了，留着账户身份的今日缓存没有意义，
-   * 也避免共享设备上留下上一个账户的数据。
+   * `huedle:daily:user:<userId>` 与 `huedle:history:user:<userId>`——token 都没了，
+   * 留着账户身份的今日 / 历史缓存没有意义，也避免共享设备上留下上一个账户的数据。
+   * 两个登录模式缓存按现有约定一起清，不会只清一个留下另一个。
    *
    * **不清 `notice`**：401 回退的提示需要跨过"按模式重建路由内容"活下来。
    * 登录成功（`setSession`）与主动登出（`logout`）会清掉它。
@@ -130,7 +133,10 @@ export const useSessionStore = defineStore('session', () => {
     hydrated.value = true;
     writeToken(null);
     clearIdentity();
-    if (previousUserId !== null) clearUserDaily(previousUserId);
+    if (previousUserId !== null) {
+      clearUserDaily(previousUserId);
+      clearUserHistory(previousUserId);
+    }
   }
 
   /**

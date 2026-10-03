@@ -5,17 +5,21 @@ import {
   clearLocalData,
   clearLocalHistory,
   clearUserDaily,
+  clearUserHistory,
   isRevealedToday,
   loadHistory,
   loadIdentity,
   loadRevealedMarker,
   loadTodayResult,
   loadUserDaily,
+  loadUserHistory,
   saveIdentity,
   saveRevealedMarker,
   saveTodayResult,
   saveUserDaily,
+  saveUserHistory,
   userDailyKey,
+  userHistoryKey,
 } from './storage';
 import type { HistoryItem } from './storage';
 
@@ -297,6 +301,99 @@ describe('用户今日结果缓存（huedle:daily:user:<userId>）', () => {
 
     expect(loadUserDaily('u1', '2026-03-04')).toBeNull();
     expect(loadUserDaily('u2', '2026-03-04')).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 登录模式的历史缓存：`huedle:history:user:<userId>` = { day, items }
+//
+//   有效期判定用 `day`（跨天自然失效）。它与本地模式的 `huedle:history`
+//   是**不同的 key**，登录模式永远不会写本地那个裸数组。
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('用户历史缓存（huedle:history:user:<userId>）', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  const items: HistoryItem[] = [
+    { ...item, date: '2026-03-04' },
+    { ...item, date: '2026-03-06' },
+  ];
+
+  it('key 是 huedle:history:user:<userId>，写的是 { day, items }，不碰本地 huedle:history', () => {
+    expect(userHistoryKey('u1')).toBe('huedle:history:user:u1');
+    expect(userHistoryKey('u1')).not.toBe(STORAGE_KEYS.history);
+
+    saveUserHistory('u1', '2026-03-06', items);
+
+    const raw = JSON.parse(localStorage.getItem('huedle:history:user:u1')!) as {
+      day: string;
+      items: unknown[];
+    };
+    expect(raw.day).toBe('2026-03-06');
+    expect(raw.items).toHaveLength(2);
+    // 本地模式专属的三个键一个都没被写
+    expect(localStorage.getItem(STORAGE_KEYS.daily)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.history)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.streak)).toBeNull();
+  });
+
+  it('按 (userId, day) 命中，且读出来是降序；别的账户 / 别的日期不命中', () => {
+    saveUserHistory('u1', '2026-03-06', items);
+
+    expect(loadUserHistory('u1', '2026-03-06')?.map(entry => entry.date)).toEqual([
+      '2026-03-06',
+      '2026-03-04',
+    ]);
+    expect(loadUserHistory('u2', '2026-03-06')).toBeNull();
+    // 跨天 → null（调用方据此回服务端）
+    expect(loadUserHistory('u1', '2026-03-07')).toBeNull();
+  });
+
+  it('缓存空历史也是有效缓存（[] ≠ null）', () => {
+    saveUserHistory('u1', '2026-03-06', []);
+
+    expect(loadUserHistory('u1', '2026-03-06')).toEqual([]);
+  });
+
+  it.each([
+    ['非 JSON', 'not-json'],
+    ['数组', '[]'],
+    ['缺 day', '{"items":[]}'],
+    ['day 格式不对', '{"day":"03/06/2026","items":[]}'],
+    ['items 不是数组', '{"day":"2026-03-06","items":"x"}'],
+    ['版本不符', '{"v":99,"day":"2026-03-06","items":[]}'],
+  ])('脏数据（%s）→ null，绝不抛', (_label, raw) => {
+    localStorage.setItem(userHistoryKey('u1'), raw);
+
+    expect(() => loadUserHistory('u1', '2026-03-06')).not.toThrow();
+    expect(loadUserHistory('u1', '2026-03-06')).toBeNull();
+  });
+
+  it('坏记录只丢自己', () => {
+    localStorage.setItem(
+      userHistoryKey('u1'),
+      JSON.stringify({
+        v: 1,
+        day: '2026-03-06',
+        items: [item, { date: '2026-03-05' }, null, 'oops'],
+      }),
+    );
+
+    expect(loadUserHistory('u1', '2026-03-06')).toEqual([{ ...item, date: '2026-03-04' }]);
+  });
+
+  it('clearUserHistory 只删指定账户；clearLocalData 删掉所有账户的历史缓存', () => {
+    saveUserHistory('u1', '2026-03-06', items);
+    saveUserHistory('u2', '2026-03-06', items);
+
+    clearUserHistory('u1');
+    expect(loadUserHistory('u1', '2026-03-06')).toBeNull();
+    expect(loadUserHistory('u2', '2026-03-06')).not.toBeNull();
+
+    clearLocalData();
+    expect(loadUserHistory('u2', '2026-03-06')).toBeNull();
   });
 });
 

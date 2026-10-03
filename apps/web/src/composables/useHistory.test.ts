@@ -12,11 +12,16 @@ import {
   STORAGE_KEYS,
   computeStreak,
   loadHistory,
+  loadUserDaily,
+  loadUserHistory,
   saveTodayResult,
+  saveUserHistory,
+  userHistoryKey,
   type HistoryItem,
 } from '../lib/storage';
 import { apiErrorReply, installFetchMock } from '../test-utils/mock-fetch';
 import { useSessionStore } from '../stores/session';
+import { useDailyColor } from './useDailyColor';
 import { computeHistoryStats, useHistory } from './useHistory';
 
 const DAY = (date: string, over: Partial<HistoryItem> = {}): HistoryItem => ({
@@ -290,5 +295,127 @@ describe('useHistory — 登录模式', () => {
 
     expect(history.entries.value).toEqual(serverItems);
     expect(loadHistory().map(entry => entry.date)).toEqual(['2026-03-05']);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 登录模式的历史缓存（任务 C）：`huedle:history:user:<userId>` = { day, items }
+//
+//   - 命中即 0 请求；
+//   - 有效期 = `day === utcDate()`（跨天自动失效）；
+//   - 按用户分键；
+//   - **今日结果缓存一被写入就作废**（否则出现"我明明抽了今天的，历史页却没有"）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('useHistory — 登录模式历史缓存', () => {
+  const ANCHOR = new Date('2026-03-06T12:00:00Z');
+  const TODAY = '2026-03-06';
+
+  beforeEach(() => {
+    localStorage.clear();
+    setActivePinia(createPinia());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function loginAs(id = 'u1', name = 'Alice'): ReturnType<typeof useSessionStore> {
+    const store = useSessionStore();
+    store.setSession(`tok-${id}`, { id, name });
+    return store;
+  }
+
+  // ── ① 缓存命中 ──────────────────────────────────────────────────────────
+  it('1. 缓存命中：预置有效缓存 → reload() 一个 fetch 都不发，页面数据来自缓存', async () => {
+    loginAs();
+    const cached = [DAY(TODAY, { cp: 900 }), DAY('2026-03-04', { cp: 100 })];
+    saveUserHistory('u1', TODAY, cached);
+
+    // 任何 fetch 都算失败：命中缓存时 reload() 不应该走网络。
+    const { mock, calls } = installFetchMock(() => {
+      throw new TypeError('缓存命中时不应发请求');
+    });
+
+    const history = useHistory({ date: ANCHOR }); // 构造时立刻 reload 一次
+    await history.reload();
+
+    expect(mock).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(0);
+    expect(history.entries.value).toEqual(cached);
+    expect(history.stats.value.totalDays).toBe(2);
+    expect(history.stats.value.bestCp).toBe(900);
+    expect(history.stats.value.bestEntry?.date).toBe(TODAY);
+  });
+
+  // ── ② 跨天失效 ──────────────────────────────────────────────────────────
+  it('2. 跨天失效：缓存 day 是昨天 → 断言会请求服务器，并用新的一天覆盖缓存', async () => {
+    loginAs();
+    saveUserHistory('u1', '2026-03-05', [DAY('2026-03-05', { cp: 1 })]);
+    const serverItems = [DAY(TODAY, { cp: 900 }), DAY('2026-03-05', { cp: 1 })];
+    const { calls } = installFetchMock(() => ({ body: serverItems }));
+
+    const history = useHistory({ date: ANCHOR });
+    await history.reload();
+
+    expect(calls.some(call => call.url.endsWith('/api/history'))).toBe(true);
+    expect(history.entries.value).toEqual(serverItems);
+    // 新的一份写回缓存，day 是"今天"
+    expect(loadUserHistory('u1', TODAY)).toEqual(serverItems);
+    expect(loadUserHistory('u1', '2026-03-05')).toBeNull(); // 被覆盖，旧 day 不再命中
+  });
+
+  // ── ③ 抽颜色让历史缓存失效（最重要的一条） ─────────────────────────────
+  it('3. 抽颜色让历史失效：daily 缓存一写入 → 历史缓存被清，下次 reload 重新请求', async () => {
+    loginAs();
+
+    // 玩家上午先打开「我的」：服务端返回 1 条，缓存下来（0 请求）
+    const morningHistory = [DAY('2026-03-05', { cp: 10 })];
+    saveUserHistory('u1', TODAY, morningHistory);
+    const history = useHistory({ date: ANCHOR });
+    expect(history.entries.value).toEqual(morningHistory);
+    expect(localStorage.getItem(userHistoryKey('u1'))).not.toBeNull();
+
+    // 回到今日页抽今天的颜色：`huedle:daily:user:u1` 缓存未命中 → 走 /api/daily（会写缓存）
+    const newToday = DAY(TODAY, { cp: 999, rarity: 'epic' });
+    const freshHistory = [newToday, ...morningHistory];
+    const { calls } = installFetchMock(call =>
+      call.url.endsWith('/api/daily') ? { body: { ...newToday, streak: 2 } } : { body: freshHistory },
+    );
+
+    const play = useDailyColor({ date: ANCHOR });
+    await play.load();
+
+    expect(calls.filter(call => call.url.endsWith('/api/daily'))).toHaveLength(1);
+    expect(loadUserDaily('u1', TODAY)).not.toBeNull(); // 今日缓存确实被写入
+
+    // 关键：历史缓存已被连带清掉（否则会命中上午那份旧历史）
+    expect(localStorage.getItem(userHistoryKey('u1'))).toBeNull();
+    expect(loadUserHistory('u1', TODAY)).toBeNull();
+
+    // 因此回到「我的」必须重新请求，并拿到"多出来的今天那条"
+    await history.reload();
+    expect(calls.filter(call => call.url.endsWith('/api/history'))).toHaveLength(1);
+    expect(history.entries.value).toEqual(freshHistory);
+    expect(history.entries.value.map(entry => entry.date)).toContain(TODAY);
+  });
+
+  // ── ④ 按用户分键 ────────────────────────────────────────────────────────
+  it('4. 按用户分键：用户 A 的历史缓存不会被用户 B 命中', async () => {
+    const cachedA = [DAY(TODAY, { cp: 900 })];
+    saveUserHistory('u1', TODAY, cachedA);
+
+    loginAs('u2', 'Bob');
+    const serverItems = [DAY(TODAY, { cp: 7 })];
+    const { calls } = installFetchMock(() => ({ body: serverItems }));
+
+    const history = useHistory({ date: ANCHOR });
+    await history.reload();
+
+    // B 没命中 A 的缓存 → 走了服务端
+    expect(calls.some(call => call.url.endsWith('/api/history'))).toBe(true);
+    expect(history.entries.value).toEqual(serverItems);
+    // A 的缓存原样还在，没有被 B 覆盖
+    expect(loadUserHistory('u1', TODAY)).toEqual(cachedA);
   });
 });
