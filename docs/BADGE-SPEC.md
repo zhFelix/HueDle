@@ -112,7 +112,16 @@ export interface Badge {
 > `ScoreRarity`（总分稀有度）与 `BadgeRarity` 共用同一组字面量，但**阈值表各自独立**。
 > 本阶段只产出 `BadgeRarity`，`ScoreRarity` 的 `getRarity()` 留给后续阶段。
 
-### CP 校准表（按 `rarity` 取值，同 rarity 内要有区分度）
+> ⚠️ **本节已过时，与代码矛盾，不要照做。**
+>
+> 下面是**手填分值时代**的产物。现在 CP 由概率算出（`ep = 100/p`，见
+> [PRICING-SPEC.md](PRICING-SPEC.md)），`BadgeDef` 里**根本没有 `cp` / `rarity` 字段**；
+> 下面的「全局配额」也已废除——现在的 mythic/anomaly 各有 16 条，
+> 稀有度是概率算出来的**结果**，不是需要遵守的配额。
+>
+> 添加徽章请照 [ADD-BADGE.md](ADD-BADGE.md) 做。
+
+### ~~CP 校准表（按 `rarity` 取值，同 rarity 内要有区分度）~~
 
 | rarity | 单徽章 CP 区间 | 说明 |
 |---|---|---|
@@ -123,7 +132,7 @@ export interface Badge {
 | anomaly | 250–400 | 极窄条件 |
 | mythic | 500–800 | 唯一/精确色 |
 
-### 全局配额（防止叠加后人人神话）
+### ~~全局配额（防止叠加后人人神话）~~ —— **已废除，见上方警示**
 
 - `mythic`：全项目 **≤ 4 条**，且名额已预分配：`culture` 1、`math` 1、`extreme` 1、`pattern` 1。其余家族 **不得**出现 mythic。
 - `anomaly`：全项目 **≤ 6 条**，预分配：`gray` 1、`pure` 1、`channel` 1、`perception` 1、`lucky` 1，余 1 条自由。
