@@ -213,7 +213,27 @@ pooler 是 IPv4。地址在 Supabase 控制台 → **Connect** → **Session poo
 （反过来，只有确实跑在反向代理后面才该打开它。直连部署下任何客户端都能自己伪造
 `X-Forwarded-For`，无条件采信等于给限流留一个一行即破的后门——所以默认是关的。）
 
-**③ 前端是 https，后端也必须是 https**
+**③ 部署后最多 10 分钟，已有访客可能拿到旧包**
+
+GitHub Pages 给**所有**文件（含 `index.html`）都设了 `cache-control: max-age=600`，
+而且不允许自定义响应头。所以部署完成后，之前访问过的浏览器会继续用旧的
+`index.html`，它引用的还是旧 bundle。
+
+表现很有迷惑性：**网站看起来完全正常，只有某个功能悄悄坏掉**。
+实测踩过一次——改了 `API_BASE_URL`，但浏览器加载的是旧包，里面内联的还是
+`http://localhost:3001`，于是 https 页面请求 http 被按混合内容拦掉，
+前端只报「无法连接服务器」。
+
+排查手法：在控制台看实际加载的是哪个 bundle
+
+```js
+document.querySelector('script[src]').src
+```
+
+文件名是内容哈希的，**没变就说明拿到的是旧包**。强制刷新（Ctrl/Cmd + Shift + R）
+或用无痕窗口即可。
+
+**④ 前端是 https，后端也必须是 https**
 
 否则浏览器会以混合内容为由直接拦掉请求。Railway 生成的域名自带 TLS。
 
