@@ -34,13 +34,33 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: 检查 API 地址是否已配置
+        # 这一步存在的理由：变量没配时 `vars.API_BASE_URL` 展开成**空串**，
+        # 构建仍然成功，只是产物里内联了 http://localhost:3001 —— 网站看起来一切正常、
+        # 只有登录悄悄坏掉。实测踩过一次（产物文件名都没变，因为内容没变）。
+        # 所以这里显式报警，让它在日志里可见，而不是等到用户点登录才发现。
+        env:
+          API_BASE: ${{ vars.API_BASE_URL || secrets.API_BASE_URL }}
+        run: |
+          if [ -z "$API_BASE" ]; then
+            echo "::error::未配置 API_BASE_URL。前端会回落到 http://localhost:3001，登录功能将不可用。"
+            echo "请在 Settings → Secrets and variables → Actions → **Variables** 里添加 API_BASE_URL。"
+            exit 1
+          fi
+          case "$API_BASE" in
+            https://*) echo "API_BASE_URL = $API_BASE" ;;
+            *)
+              echo "::error::API_BASE_URL 必须是 https://（页面是 https，混合内容会被浏览器拦掉），当前为：$API_BASE"
+              exit 1
+              ;;
+          esac
+
       - name: 构建（项目页在子路径下，必须设 base）
         run: pnpm -C apps/web exec vite build --base=/HueDle/
         env:
-          # 仓库变量，Settings → Secrets and variables → Actions → Variables
-          # 未设置时为空串，前端会退到默认的 localhost:3001，登录模式连不上，
-          # 但本地模式不受影响。
-          VITE_API_BASE: ${{ vars.API_BASE_URL }}
+          # 同时接受 Variables 与 Secrets 两种放法——少一个踩坑点。
+          # （GitHub 上这两个是不同的标签页，Secrets 还是默认页，很容易放错。）
+          VITE_API_BASE: ${{ vars.API_BASE_URL || secrets.API_BASE_URL }}
 
       - name: 生成 SPA 回退页
         # GitHub Pages 没有 SPA rewrite：直接访问 /HueDle/me 会 404。
