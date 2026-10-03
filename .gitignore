@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+.DS_Store
+*.local
+
+# 环境变量：含数据库密码与 token 密钥，绝不入库（.env.example 例外）
+.env
+.env.*
+!.env.example
+
+# pnpm 的内容寻址存储（可能在仓库根出现，几千个文件）
+.pnpm-store/

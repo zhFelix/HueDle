@@ -1,0 +1,21 @@
+@import 'tailwindcss';
+
+/* Tailwind v4 默认扫描项目源码；这里显式声明，确保 lib/*.ts 里的稀有度类名也被收集。 */
+@source './**/*.{vue,ts}';
+
+@theme {
+  --color-ink-950: #08090c;
+  --color-ink-900: #0e1015;
+  --color-ink-800: #171a21;
+  --color-ink-700: #23262f;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  @apply bg-ink-950 text-neutral-200 antialiased;
+}

@@ -1,0 +1,14 @@
+packages:
+  - 'packages/*'
+  - 'apps/*'
+minimumReleaseAgeExclude:
+  - '@vue/language-core@3.3.12'
+  - vue-tsc@3.3.12
+# tsx 依赖的 esbuild 带 postinstall 脚本。pnpm 11+ 默认既不执行、也要求显式决策，
+# 否则 pnpm install 以非零码退出（ERR_PNPM_IGNORED_BUILDS）。
+# 这里显式「拒绝执行」：esbuild 的二进制由可选依赖 @esbuild/<platform> 提供，
+# 脚本只做校验；跳过它 tsx / vitest / vite 均实测正常。
+# 若希望照常跑该脚本，把 false 改成 true 即可。
+allowBuilds:
+  esbuild: false
+

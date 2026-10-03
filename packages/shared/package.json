@@ -1,0 +1,23 @@
+{
+  "name": "@huedle/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "enumerate": "vitest run --config vitest.enumerate.config.ts",
+    "supersession": "vitest run --config vitest.enumerate.config.ts scripts/supersession.test.ts",
+    "docs": "UPDATE_DOCS=1 vitest run src/badges/__tests__/docs.test.ts"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}

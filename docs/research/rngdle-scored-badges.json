@@ -1,0 +1,1397 @@
+[
+ {
+  "id": "SIXTH_POWER",
+  "label": "6th Power",
+  "desc": "A perfect sixth power (n⁶).",
+  "emoji": "🎲",
+  "family": null,
+  "ep": 9090918,
+  "prob": "0.0011%"
+ },
+ {
+  "id": "POWER_OF_THREE",
+  "label": "Power of Three",
+  "desc": "A power of 3 (3ⁿ).",
+  "emoji": "🔺",
+  "family": null,
+  "ep": 7692315,
+  "prob": "0.0013%"
+ },
+ {
+  "id": "FIFTH_POWER",
+  "label": "5th Power",
+  "desc": "A perfect fifth power (n⁵).",
+  "emoji": "🖐️",
+  "family": null,
+  "ep": 6250006,
+  "prob": "0.0016%"
+ },
+ {
+  "id": "JACKPOT_FIVE",
+  "label": "Jackpot Five",
+  "desc": "Contains five 7s in a row.",
+  "emoji": "💰💰💰",
+  "family": null,
+  "ep": 5263163,
+  "prob": "0.0019%"
+ },
+ {
+  "id": "POWER_OF_TWO",
+  "label": "Power of Two",
+  "desc": "A power of 2 (2ⁿ).",
+  "emoji": "💾",
+  "family": null,
+  "ep": 5000005,
+  "prob": "0.0020%"
+ },
+ {
+  "id": "ROYAL_FLUSH",
+  "label": "Royal Flush",
+  "desc": "Contains 56789 — the highest possible straight.",
+  "emoji": "👑",
+  "family": null,
+  "ep": 5000005,
+  "prob": "0.0020%"
+ },
+ {
+  "id": "BOOB_58008",
+  "label": "58008",
+  "desc": "Contains \"58008\" (spells BOOBS upside-down).",
+  "emoji": "🔠",
+  "family": null,
+  "ep": 5000005,
+  "prob": "0.0020%"
+ },
+ {
+  "id": "BOOB_80085",
+  "label": "80085",
+  "desc": "Contains \"80085\" (spells BOOBS).",
+  "emoji": "🅱️",
+  "family": null,
+  "ep": 5000005,
+  "prob": "0.0020%"
+ },
+ {
+  "id": "PI_CONTAINS_5",
+  "label": "Pi Slice (5)",
+  "desc": "Contains \"31415\".",
+  "emoji": "🥧",
+  "family": null,
+  "ep": 5000005,
+  "prob": "0.0020%"
+ },
+ {
+  "id": "E_CONTAINS_5",
+  "label": "E Slice (5)",
+  "desc": "Contains \"27182\".",
+  "emoji": "📈",
+  "family": null,
+  "ep": 5000005,
+  "prob": "0.0020%"
+ },
+ {
+  "id": "TAU_SLICE_5",
+  "label": "Tau Slice (5)",
+  "desc": "Contains \"62831\".",
+  "emoji": "🌀",
+  "family": null,
+  "ep": 5000005,
+  "prob": "0.0020%"
+ },
+ {
+  "id": "CASCADE",
+  "label": "Cascade",
+  "desc": "Every digit increases by exactly 1 from the previous.",
+  "emoji": "🌊",
+  "family": null,
+  "ep": 3333337,
+  "prob": "0.0030%"
+ },
+ {
+  "id": "FIBONACCI",
+  "label": "Fibonacci Number",
+  "desc": "Part of the golden ratio sequence found in nature.",
+  "emoji": "🐚",
+  "family": null,
+  "ep": 3333337,
+  "prob": "0.0030%"
+ },
+ {
+  "id": "FOURTH_POWER",
+  "label": "4th Power",
+  "desc": "A perfect fourth power (n⁴).",
+  "emoji": "📦",
+  "family": null,
+  "ep": 3125003,
+  "prob": "0.0032%"
+ },
+ {
+  "id": "WATERFALL",
+  "label": "Waterfall",
+  "desc": "Every digit decreases by exactly 1 from the previous.",
+  "emoji": "🚿",
+  "family": null,
+  "ep": 2857146,
+  "prob": "0.0035%"
+ },
+ {
+  "id": "CONSEC_QUAD_CONTAINS",
+  "label": "4 Consecutive Numbers (Contains)",
+  "desc": "Contains four adjacent consecutive integers.",
+  "emoji": "🔗",
+  "family": null,
+  "ep": 2631582,
+  "prob": "0.0038%"
+ },
+ {
+  "id": "CONSEC_QUAD_SCRAMBLED",
+  "label": "4 Consecutive Numbers (Scrambled)",
+  "desc": "The entire number splits into four consecutive integers, but not in order.",
+  "emoji": "🔀",
+  "family": null,
+  "ep": 2272730,
+  "prob": "0.0044%"
+ },
+ {
+  "id": "HOMOGENEOUS",
+  "label": "Homogeneous",
+  "desc": "All digits are the same.",
+  "emoji": "🥛",
+  "family": null,
+  "ep": 2222224,
+  "prob": "0.0045%"
+ },
+ {
+  "id": "ULTIMEME",
+  "label": "Funny Numbers",
+  "desc": "Contains both \"69\" and \"420\".",
+  "emoji": "😂",
+  "family": null,
+  "ep": 1666668,
+  "prob": "0.0060%"
+ },
+ {
+  "id": "BINARY_SOUL",
+  "label": "Binary Soul",
+  "desc": "Only 0s and 1s.",
+  "emoji": "🤖",
+  "family": null,
+  "ep": 1538463,
+  "prob": "0.0065%"
+ },
+ {
+  "id": "STRAIGHT_FLUSH",
+  "label": "Straight Flush",
+  "desc": "Contains 5 consecutive same-parity digits (02468, 13579, or their reverse).",
+  "emoji": "🃏",
+  "family": null,
+  "ep": 1449277,
+  "prob": "0.0069%"
+ },
+ {
+  "id": "TWO_DIGITS",
+  "label": "Two Digits",
+  "desc": "Has exactly two digits.",
+  "emoji": "✌️",
+  "family": null,
+  "ep": 1111112,
+  "prob": "0.0090%"
+ },
+ {
+  "id": "SPY",
+  "label": "Spy Number",
+  "desc": "The sum of its digits equals the product of its digits.",
+  "emoji": "🕵️",
+  "family": null,
+  "ep": 1030929,
+  "prob": "0.0097%"
+ },
+ {
+  "id": "EPOCH",
+  "label": "Epoch",
+  "desc": "Ends in four zeros.",
+  "emoji": "🏛️",
+  "family": null,
+  "ep": 1000001,
+  "prob": "0.0100%"
+ },
+ {
+  "id": "QUAD_NINE",
+  "label": "Quad Nine",
+  "desc": "Ends in 9999.",
+  "emoji": "🎊",
+  "family": null,
+  "ep": 1000001,
+  "prob": "0.0100%"
+ },
+ {
+  "id": "SEMI_EPOCH",
+  "label": "Semi-Epoch",
+  "desc": "Ends in \"5000\".",
+  "emoji": "⌛",
+  "family": null,
+  "ep": 1000001,
+  "prob": "0.0100%"
+ },
+ {
+  "id": "CUBE",
+  "label": "3rd Power",
+  "desc": "A perfect cube (n³).",
+  "emoji": "🧊",
+  "family": null,
+  "ep": 990100,
+  "prob": "0.01%"
+ },
+ {
+  "id": "EVEN_SPACING",
+  "label": "Even Spacing",
+  "desc": "All digits are evenly spaced in an arithmetic sequence.",
+  "emoji": "📏",
+  "family": null,
+  "ep": 862070,
+  "prob": "0.01%"
+ },
+ {
+  "id": "CONSEC_TRIPLE_EXACT",
+  "label": "3 Consecutive Numbers",
+  "desc": "The entire number splits into three consecutive integers in order.",
+  "emoji": "⛓️",
+  "family": null,
+  "ep": 555556,
+  "prob": "0.02%"
+ },
+ {
+  "id": "CONTIGUOUS_FIVES",
+  "label": "Contiguous Fives",
+  "desc": "Five identical consecutive digits.",
+  "emoji": "➖➖➖",
+  "family": null,
+  "ep": 552487,
+  "prob": "0.02%"
+ },
+ {
+  "id": "DEEP_VOID_FOUR",
+  "label": "Deep Void (4)",
+  "desc": "Contains \"0000\".",
+  "emoji": "🌌",
+  "family": null,
+  "ep": 552487,
+  "prob": "0.02%"
+ },
+ {
+  "id": "STROBOGRAMMATIC",
+  "label": "Strobogrammatic",
+  "desc": "Looks the same when rotated 180 degrees.",
+  "emoji": "🙃",
+  "family": null,
+  "ep": 502513,
+  "prob": "0.02%"
+ },
+ {
+  "id": "STRAIGHT",
+  "label": "Straight",
+  "desc": "Contains a sequence of 5 consecutive digits (ascending or descending).",
+  "emoji": "📏",
+  "family": null,
+  "ep": 454546,
+  "prob": "0.02%"
+ },
+ {
+  "id": "JACKPOT_FOUR",
+  "label": "Jackpot Four",
+  "desc": "Contains four 7s in a row.",
+  "emoji": "💰💰",
+  "family": null,
+  "ep": 357143,
+  "prob": "0.03%"
+ },
+ {
+  "id": "VERY_NICE",
+  "label": "Very Nice",
+  "desc": "Contains \"6969\".",
+  "emoji": "🥵",
+  "family": null,
+  "ep": 334448,
+  "prob": "0.03%"
+ },
+ {
+  "id": "DEEPER_MEANING",
+  "label": "Deeper Meaning",
+  "desc": "Contains \"4242\".",
+  "emoji": "🌌",
+  "family": null,
+  "ep": 334448,
+  "prob": "0.03%"
+ },
+ {
+  "id": "SIXTY_SEVEN_DOUBLE",
+  "label": "6767",
+  "desc": "Contains \"6767\".",
+  "emoji": "🫠",
+  "family": null,
+  "ep": 334448,
+  "prob": "0.03%"
+ },
+ {
+  "id": "LEET",
+  "label": "Leet",
+  "desc": "Contains \"1337\".",
+  "emoji": "💻",
+  "family": null,
+  "ep": 333334,
+  "prob": "0.03%"
+ },
+ {
+  "id": "HELL",
+  "label": "Hell",
+  "desc": "Contains \"7734\" (spells HELL upside-down).",
+  "emoji": "🔥",
+  "family": null,
+  "ep": 333334,
+  "prob": "0.03%"
+ },
+ {
+  "id": "BOOB_8008",
+  "label": "8008",
+  "desc": "Contains \"8008\" (spells BOOB upside-down).",
+  "emoji": "🔢",
+  "family": null,
+  "ep": 333334,
+  "prob": "0.03%"
+ },
+ {
+  "id": "BIG_BROTHER",
+  "label": "Big Brother",
+  "desc": "Contains \"1984\".",
+  "emoji": "👁️",
+  "family": null,
+  "ep": 333334,
+  "prob": "0.03%"
+ },
+ {
+  "id": "PI_CONTAINS_4",
+  "label": "Pi Slice (4)",
+  "desc": "Contains \"3141\".",
+  "emoji": "🥧",
+  "family": null,
+  "ep": 333334,
+  "prob": "0.03%"
+ },
+ {
+  "id": "E_CONTAINS_4",
+  "label": "E Slice (4)",
+  "desc": "Contains \"2718\".",
+  "emoji": "📈",
+  "family": null,
+  "ep": 333334,
+  "prob": "0.03%"
+ },
+ {
+  "id": "TAU_SLICE_4",
+  "label": "Tau Slice (4)",
+  "desc": "Contains \"6283\".",
+  "emoji": "🌀",
+  "family": null,
+  "ep": 333334,
+  "prob": "0.03%"
+ },
+ {
+  "id": "CONSEC_TRIPLE_SCRAMBLED",
+  "label": "3 Consecutive Numbers (Scrambled)",
+  "desc": "The entire number splits into three consecutive integers, but not in order.",
+  "emoji": "🔀",
+  "family": null,
+  "ep": 277778,
+  "prob": "0.04%"
+ },
+ {
+  "id": "ZIPPER",
+  "label": "Zipper",
+  "desc": "Two digits alternating perfectly.",
+  "emoji": "🤐",
+  "family": null,
+  "ep": 246914,
+  "prob": "0.04%"
+ },
+ {
+  "id": "ASCENSION",
+  "label": "Ascension",
+  "desc": "Every digit is strictly larger than the previous.",
+  "emoji": "📈",
+  "family": null,
+  "ep": 219298,
+  "prob": "0.05%"
+ },
+ {
+  "id": "GEOMETRIC",
+  "label": "Crescendo",
+  "desc": "Splits into three or more numbers with a constant ratio.",
+  "emoji": "🔊",
+  "family": null,
+  "ep": 208334,
+  "prob": "0.05%"
+ },
+ {
+  "id": "FIVE_OF_A_KIND",
+  "label": "Five of a Kind",
+  "desc": "Contains five identical digits.",
+  "emoji": "🃏",
+  "family": null,
+  "ep": 198020,
+  "prob": "0.05%"
+ },
+ {
+  "id": "CONSEC_TRIPLE_CONTAINS",
+  "label": "3 Consecutive Numbers (Contains)",
+  "desc": "Contains three adjacent consecutive integers.",
+  "emoji": "🔗",
+  "family": null,
+  "ep": 157978,
+  "prob": "0.06%"
+ },
+ {
+  "id": "CONTIGUOUS_THREE_PAIR",
+  "label": "Contiguous Three Pair",
+  "desc": "Contains three adjacent contiguous pairs.",
+  "emoji": "👨‍👩‍👧‍👦👯",
+  "family": null,
+  "ep": 154321,
+  "prob": "0.06%"
+ },
+ {
+  "id": "FRAMED_PAIR",
+  "label": "Framed Pair",
+  "desc": "A 4-digit number where the middle two digits match each other but differ from both end digits.",
+  "emoji": "🖼️",
+  "family": null,
+  "ep": 137174,
+  "prob": "0.07%"
+ },
+ {
+  "id": "FRAMED_TRIPLE",
+  "label": "Framed Triple",
+  "desc": "A triple in the middle, bookended by different digits.",
+  "emoji": "🖼️🖼️",
+  "family": null,
+  "ep": 137174,
+  "prob": "0.07%"
+ },
+ {
+  "id": "FRAMED_QUAD",
+  "label": "Framed Quad",
+  "desc": "Four of a kind in the middle, bookended by different digits.",
+  "emoji": "🪟",
+  "family": null,
+  "ep": 137174,
+  "prob": "0.07%"
+ },
+ {
+  "id": "DECAY",
+  "label": "Decay",
+  "desc": "Every digit is strictly smaller than the previous.",
+  "emoji": "📉",
+  "family": null,
+  "ep": 119474,
+  "prob": "0.08%"
+ },
+ {
+  "id": "THREE_DIGITS",
+  "label": "Three Digits",
+  "desc": "Has exactly three digits.",
+  "emoji": "🤟",
+  "family": null,
+  "ep": 111111,
+  "prob": "0.09%"
+ },
+ {
+  "id": "ECHO",
+  "label": "Echo",
+  "desc": "The first half repeats as the second half.",
+  "emoji": "📣",
+  "family": null,
+  "ep": 100100,
+  "prob": "0.10%"
+ },
+ {
+  "id": "SQUARE",
+  "label": "2nd Power",
+  "desc": "A perfect square (n²).",
+  "emoji": "🟦",
+  "family": null,
+  "ep": 99900,
+  "prob": "0.10%"
+ },
+ {
+  "id": "EVEN_SPACING_ABS",
+  "label": "Even Spacing (Absolute)",
+  "desc": "All digits have the same absolute spacing (e.g., ±2 each time).",
+  "emoji": "📐",
+  "family": null,
+  "ep": 90992,
+  "prob": "0.11%"
+ },
+ {
+  "id": "FIREFLY",
+  "label": "Firefly",
+  "desc": "One unique digit among identical others.",
+  "emoji": "🪲",
+  "family": null,
+  "ep": 82237,
+  "prob": "0.12%"
+ },
+ {
+  "id": "CONSEC_PAIR_EXACT",
+  "label": "2 Consecutive Numbers",
+  "desc": "The entire number splits into two consecutive integers.",
+  "emoji": "🔗",
+  "family": null,
+  "ep": 50505,
+  "prob": "0.20%"
+ },
+ {
+  "id": "PALINDROME",
+  "label": "Palindrome",
+  "desc": "Reads the same forwards and backwards.",
+  "emoji": "🪞",
+  "family": null,
+  "ep": 50025,
+  "prob": "0.20%"
+ },
+ {
+  "id": "CONTIGUOUS_QUADS",
+  "label": "Contiguous Quads",
+  "desc": "Four identical consecutive digits.",
+  "emoji": "➖➖",
+  "family": null,
+  "ep": 37023,
+  "prob": "0.27%"
+ },
+ {
+  "id": "DEEP_VOID_THREE",
+  "label": "Deep Void (3)",
+  "desc": "Contains \"000\".",
+  "emoji": "🌑",
+  "family": null,
+  "ep": 37023,
+  "prob": "0.27%"
+ },
+ {
+  "id": "TURTLE",
+  "label": "Turtle",
+  "desc": "All consecutive digits differ by at most 1.",
+  "emoji": "🐢",
+  "family": null,
+  "ep": 36049,
+  "prob": "0.28%"
+ },
+ {
+  "id": "SECRET_AGENT",
+  "label": "Secret Agent",
+  "desc": "Contains \"007\".",
+  "emoji": "🕶️",
+  "family": null,
+  "ep": 34614,
+  "prob": "0.29%"
+ },
+ {
+  "id": "HEAVY",
+  "label": "Heavy",
+  "desc": "The sum of its digits exceeds 45.",
+  "emoji": "🧱",
+  "family": null,
+  "ep": 33300,
+  "prob": "0.30%"
+ },
+ {
+  "id": "CONTIGUOUS_BOAT",
+  "label": "Contiguous Full House",
+  "desc": "Contains a contiguous set of three adjacent to a contiguous set of two.",
+  "emoji": "🏰",
+  "family": null,
+  "ep": 30111,
+  "prob": "0.33%"
+ },
+ {
+  "id": "JACKPOT",
+  "label": "Jackpot",
+  "desc": "Contains \"777\".",
+  "emoji": "💰",
+  "family": null,
+  "ep": 27027,
+  "prob": "0.37%"
+ },
+ {
+  "id": "DEVIL",
+  "label": "Devil",
+  "desc": "Contains \"666\".",
+  "emoji": "😈",
+  "family": null,
+  "ep": 27027,
+  "prob": "0.37%"
+ },
+ {
+  "id": "SEQUENCE_4",
+  "label": "Sequence (4)",
+  "desc": "Contains a sequence of 4 consecutive digits.",
+  "emoji": "🔢",
+  "family": null,
+  "ep": 25907,
+  "prob": "0.39%"
+ },
+ {
+  "id": "ERROR",
+  "label": "Error 404",
+  "desc": "Contains \"404\".",
+  "emoji": "🚫",
+  "family": null,
+  "ep": 25132,
+  "prob": "0.40%"
+ },
+ {
+  "id": "ORIENTATION",
+  "label": "Orientation",
+  "desc": "Contains \"101\" (intro course number).",
+  "emoji": "🧭",
+  "family": null,
+  "ep": 25132,
+  "prob": "0.40%"
+ },
+ {
+  "id": "BOTANIST",
+  "label": "Botanist",
+  "desc": "Contains \"420\".",
+  "emoji": "🌿",
+  "family": null,
+  "ep": 25006,
+  "prob": "0.40%"
+ },
+ {
+  "id": "EMERGENCY",
+  "label": "Emergency",
+  "desc": "Contains \"911\".",
+  "emoji": "🚑",
+  "family": null,
+  "ep": 25006,
+  "prob": "0.40%"
+ },
+ {
+  "id": "PI_CONTAINS_3",
+  "label": "Pi Slice (3)",
+  "desc": "Contains \"314\".",
+  "emoji": "🥧",
+  "family": null,
+  "ep": 25006,
+  "prob": "0.40%"
+ },
+ {
+  "id": "E_CONTAINS_3",
+  "label": "E Slice (3)",
+  "desc": "Contains \"271\".",
+  "emoji": "📈",
+  "family": null,
+  "ep": 25006,
+  "prob": "0.40%"
+ },
+ {
+  "id": "CALENDAR",
+  "label": "Calendar",
+  "desc": "Contains \"365\" (days in a year).",
+  "emoji": "📅",
+  "family": null,
+  "ep": 25006,
+  "prob": "0.40%"
+ },
+ {
+  "id": "DIVISIBLE_BY_THREE",
+  "label": "Divisible by Three",
+  "desc": "Every digit is divisible by 3.",
+  "emoji": "🔺",
+  "family": null,
+  "ep": 24414,
+  "prob": "0.41%"
+ },
+ {
+  "id": "SCRAMBLE",
+  "label": "Scramble",
+  "desc": "All digits form a consecutive sequence when sorted.",
+  "emoji": "🔀",
+  "family": null,
+  "ep": 22722,
+  "prob": "0.44%"
+ },
+ {
+  "id": "DUALITY",
+  "label": "Duality",
+  "desc": "Uses exactly two different digits.",
+  "emoji": "☯️",
+  "family": null,
+  "ep": 21654,
+  "prob": "0.46%"
+ },
+ {
+  "id": "STEPS",
+  "label": "Steps",
+  "desc": "Digits never decrease.",
+  "emoji": "🪜",
+  "family": null,
+  "ep": 20202,
+  "prob": "0.49%"
+ },
+ {
+  "id": "ARITHMETIC",
+  "label": "Metronome",
+  "desc": "Splits into three or more numbers with a constant difference.",
+  "emoji": "🎼",
+  "family": null,
+  "ep": 17784,
+  "prob": "0.56%"
+ },
+ {
+  "id": "FRAMED_DOUBLE",
+  "label": "Framed Double",
+  "desc": "Two pairs in the middle, bookended by different digits.",
+  "emoji": "🖼️🖼️🖼️",
+  "family": null,
+  "ep": 15242,
+  "prob": "0.66%"
+ },
+ {
+  "id": "SLOPES",
+  "label": "Slopes",
+  "desc": "Digits never increase.",
+  "emoji": "🛝",
+  "family": null,
+  "ep": 12582,
+  "prob": "0.79%"
+ },
+ {
+  "id": "PAIRED_BOOKENDS",
+  "label": "Paired Bookends",
+  "desc": "Starts with a pair and ends with a different pair.",
+  "emoji": "👐",
+  "family": null,
+  "ep": 11122,
+  "prob": "0.90%"
+ },
+ {
+  "id": "FOUR_DIGITS",
+  "label": "Four Digits",
+  "desc": "Has exactly four digits.",
+  "emoji": "🍀",
+  "family": null,
+  "ep": 11111,
+  "prob": "0.90%"
+ },
+ {
+  "id": "THREE_PAIR",
+  "label": "Three Pair",
+  "desc": "Contains three distinct pairs of matching digits.",
+  "emoji": "👯‍♀️👯",
+  "family": null,
+  "ep": 10288,
+  "prob": "0.97%"
+ },
+ {
+  "id": "BOOKENDS",
+  "label": "Bookends",
+  "desc": "The first two digits match the last two.",
+  "emoji": "📚",
+  "family": null,
+  "ep": 10010,
+  "prob": "1.00%"
+ },
+ {
+  "id": "MIRROR_BOOKENDS",
+  "label": "Mirror Bookends",
+  "desc": "First two digits are reversed as the last two.",
+  "emoji": "📖",
+  "family": null,
+  "ep": 10010,
+  "prob": "1.00%"
+ },
+ {
+  "id": "QUADS",
+  "label": "Four of a Kind",
+  "desc": "Contains four identical digits.",
+  "emoji": "🍀",
+  "family": null,
+  "ep": 8436,
+  "prob": "1.2%"
+ },
+ {
+  "id": "EQUATION",
+  "label": "Equation",
+  "desc": "Insert one of + − × ÷ and an equals sign to make a true equation.",
+  "emoji": "🟰",
+  "family": null,
+  "ep": 7720,
+  "prob": "1.3%"
+ },
+ {
+  "id": "LOW_BALL",
+  "label": "Low Ball",
+  "desc": "Contains only digits from 0 to 4.",
+  "emoji": "📉",
+  "family": null,
+  "ep": 6400,
+  "prob": "1.6%"
+ },
+ {
+  "id": "MOUNTAIN",
+  "label": "Mountain",
+  "desc": "Digits ascend to a peak and then descend.",
+  "emoji": "🏔️",
+  "family": null,
+  "ep": 5885,
+  "prob": "1.7%"
+ },
+ {
+  "id": "DOUBLE_HOP",
+  "label": "Double Hop",
+  "desc": "A digit appears at every other position (3 times).",
+  "emoji": "🦘🦘",
+  "family": null,
+  "ep": 5321,
+  "prob": "1.9%"
+ },
+ {
+  "id": "HIGH_ROLLER",
+  "label": "High Roller",
+  "desc": "Contains only digits from 5 to 9.",
+  "emoji": "🤑",
+  "family": null,
+  "ep": 5120,
+  "prob": "2.0%"
+ },
+ {
+  "id": "VALLEY",
+  "label": "Valley",
+  "desc": "Digits descend to a trough and then ascend.",
+  "emoji": "🏜️",
+  "family": null,
+  "ep": 4199,
+  "prob": "2.4%"
+ },
+ {
+  "id": "CONTIGUOUS_TWO_PAIR",
+  "label": "Contiguous Two Pair",
+  "desc": "Contains two adjacent contiguous pairs.",
+  "emoji": "👨‍👩‍👧‍👦",
+  "family": null,
+  "ep": 3957,
+  "prob": "2.5%"
+ },
+ {
+  "id": "MINI_ECHO",
+  "label": "Mini Echo",
+  "desc": "Contains an adjacent 2-digit repeat.",
+  "emoji": "🔂",
+  "family": null,
+  "ep": 3704,
+  "prob": "2.7%"
+ },
+ {
+  "id": "ALTERNATOR",
+  "label": "Alternator",
+  "desc": "Digits strictly alternate between even and odd.",
+  "emoji": "⚡",
+  "family": null,
+  "ep": 2845,
+  "prob": "3.5%"
+ },
+ {
+  "id": "FLUSH",
+  "label": "Flush",
+  "desc": "All digits are either all even or all odd.",
+  "emoji": "🎨",
+  "family": null,
+  "ep": 2845,
+  "prob": "3.5%"
+ },
+ {
+  "id": "CONTIGUOUS_TRIPS",
+  "label": "Contiguous Trips",
+  "desc": "Three identical consecutive digits.",
+  "emoji": "➖",
+  "family": null,
+  "ep": 2784,
+  "prob": "3.6%"
+ },
+ {
+  "id": "DEEP_VOID",
+  "label": "Deep Void",
+  "desc": "Contains \"00\".",
+  "emoji": "🕳️",
+  "family": null,
+  "ep": 2784,
+  "prob": "3.6%"
+ },
+ {
+  "id": "FEATHER",
+  "label": "Feather",
+  "desc": "The sum of its digits is less than 15.",
+  "emoji": "🪶",
+  "family": null,
+  "ep": 2667,
+  "prob": "3.8%"
+ },
+ {
+  "id": "BLACKJACK",
+  "label": "Blackjack",
+  "desc": "Digits sum exactly to 21.",
+  "emoji": "♠️",
+  "family": null,
+  "ep": 2521,
+  "prob": "4.0%"
+ },
+ {
+  "id": "BOAT",
+  "label": "Full House",
+  "desc": "Contains a set of three and a set of two.",
+  "emoji": "🏠",
+  "family": null,
+  "ep": 2397,
+  "prob": "4.2%"
+ },
+ {
+  "id": "POCKET_MIRROR",
+  "label": "Pocket Mirror",
+  "desc": "Contains a palindrome of 4 or more digits.",
+  "emoji": "🪞",
+  "family": null,
+  "ep": 2124,
+  "prob": "4.7%"
+ },
+ {
+  "id": "SNAKE_EYES",
+  "label": "Snake Eyes",
+  "desc": "Contains a single pair of ones and no other pairs.",
+  "emoji": "🎲",
+  "family": null,
+  "ep": 2121,
+  "prob": "4.7%"
+ },
+ {
+  "id": "NICE",
+  "label": "Nice",
+  "desc": "Contains the number 69.",
+  "emoji": "😏",
+  "family": null,
+  "ep": 2024,
+  "prob": "4.9%"
+ },
+ {
+  "id": "MEANING",
+  "label": "Meaning of Life",
+  "desc": "Contains \"42\".",
+  "emoji": "🌌",
+  "family": null,
+  "ep": 2024,
+  "prob": "4.9%"
+ },
+ {
+  "id": "SIXTY_SEVEN",
+  "label": "Six-Seven",
+  "desc": "Contains \"67\".",
+  "emoji": "🫠",
+  "family": null,
+  "ep": 2024,
+  "prob": "4.9%"
+ },
+ {
+  "id": "EIGHTY_SIX",
+  "label": "Eighty-Six",
+  "desc": "Contains \"86\" (restaurant slang for \"out of\").",
+  "emoji": "🍽️",
+  "family": null,
+  "ep": 2024,
+  "prob": "4.9%"
+ },
+ {
+  "id": "BALANCED",
+  "label": "Balanced",
+  "desc": "Sum of first half of digits equals sum of second half.",
+  "emoji": "⚖️",
+  "family": null,
+  "ep": 1959,
+  "prob": "5.1%"
+ },
+ {
+  "id": "RHYME",
+  "label": "Rhyme",
+  "desc": "Contains the same 2+ digit substring twice.",
+  "emoji": "🎶",
+  "family": null,
+  "ep": 1872,
+  "prob": "5.3%"
+ },
+ {
+  "id": "SEQUENCE_3",
+  "label": "Sequence (3)",
+  "desc": "Contains a sequence of 3 consecutive digits.",
+  "emoji": "🔢",
+  "family": null,
+  "ep": 1716,
+  "prob": "5.8%"
+ },
+ {
+  "id": "CONSEC_PAIR_ADJACENT",
+  "label": "2 Consecutive Numbers (Contains)",
+  "desc": "Contains two adjacent substrings that are consecutive integers.",
+  "emoji": "🔗",
+  "family": null,
+  "ep": 1659,
+  "prob": "6.0%"
+ },
+ {
+  "id": "CONSEC_PAIR_NEARBY",
+  "label": "2 Consecutive Numbers (Nearby)",
+  "desc": "Contains two non-adjacent substrings that are consecutive integers.",
+  "emoji": "🔗",
+  "family": null,
+  "ep": 1575,
+  "prob": "6.3%"
+ },
+ {
+  "id": "MESA",
+  "label": "Mesa",
+  "desc": "Digits rise to a peak, then fall (flat stretches allowed).",
+  "emoji": "🗻",
+  "family": null,
+  "ep": 1568,
+  "prob": "6.4%"
+ },
+ {
+  "id": "PRIME",
+  "label": "Prime Number",
+  "desc": "Divisible only by 1 and itself.",
+  "emoji": "💎",
+  "family": null,
+  "ep": 1274,
+  "prob": "7.8%"
+ },
+ {
+  "id": "TRINITY",
+  "label": "Trinity",
+  "desc": "Uses exactly three different digits.",
+  "emoji": "⚜️",
+  "family": null,
+  "ep": 1265,
+  "prob": "7.9%"
+ },
+ {
+  "id": "DOZEN",
+  "label": "Dozen",
+  "desc": "Divisible by 12.",
+  "emoji": "🍩",
+  "family": null,
+  "ep": 1200,
+  "prob": "8.3%"
+ },
+ {
+  "id": "CANYON",
+  "label": "Canyon",
+  "desc": "Digits fall to a floor, then rise (flat stretches allowed).",
+  "emoji": "🌄",
+  "family": null,
+  "ep": 1184,
+  "prob": "8.4%"
+ },
+ {
+  "id": "FIVE_DIGITS",
+  "label": "Five Digits",
+  "desc": "Has exactly five digits.",
+  "emoji": "🖐️",
+  "family": null,
+  "ep": 1111,
+  "prob": "9.0%"
+ },
+ {
+  "id": "ELEVEN",
+  "label": "Eleven",
+  "desc": "Divisible by 11.",
+  "emoji": "🕚",
+  "family": null,
+  "ep": 1100,
+  "prob": "9.1%"
+ },
+ {
+  "id": "HARSHAD",
+  "label": "Harshad Number",
+  "desc": "Divisible by the sum of its own digits.",
+  "emoji": "🤝",
+  "family": null,
+  "ep": 1048,
+  "prob": "9.5%"
+ },
+ {
+  "id": "HILLS",
+  "label": "Hills",
+  "desc": "Digits strictly alternate between rising and falling.",
+  "emoji": "🏞️",
+  "family": null,
+  "ep": 733,
+  "prob": "13.6%"
+ },
+ {
+  "id": "TRIPS",
+  "label": "Three of a Kind",
+  "desc": "Contains three identical digits.",
+  "emoji": "🎰",
+  "family": null,
+  "ep": 724,
+  "prob": "13.8%"
+ },
+ {
+  "id": "LUCKY_SEVEN_DIV",
+  "label": "Lucky Seven (Divisible)",
+  "desc": "Divisible by 7.",
+  "emoji": "🎰",
+  "family": null,
+  "ep": 700,
+  "prob": "14.3%"
+ },
+ {
+  "id": "HETEROGENEOUS",
+  "label": "Heterogeneous",
+  "desc": "No repeated digits.",
+  "emoji": "🥗",
+  "family": null,
+  "ep": 593,
+  "prob": "16.9%"
+ },
+ {
+  "id": "MINI_SCRAMBLE",
+  "label": "Mini Scramble",
+  "desc": "Contains 3 or more adjacent digits that form a run when sorted.",
+  "emoji": "🧩",
+  "family": null,
+  "ep": 579,
+  "prob": "17.3%"
+ },
+ {
+  "id": "GAP_ONE",
+  "label": "Gap One",
+  "desc": "The first and last digits differ by exactly 1.",
+  "emoji": "↕️",
+  "family": null,
+  "ep": 529,
+  "prob": "18.9%"
+ },
+ {
+  "id": "TWO_PAIR",
+  "label": "Two Pair",
+  "desc": "Contains two distinct pairs of matching digits.",
+  "emoji": "👯‍♀️",
+  "family": null,
+  "ep": 377,
+  "prob": "26.6%"
+ },
+ {
+  "id": "DUNES",
+  "label": "Dunes",
+  "desc": "Rises and falls keep alternating (flat stretches allowed).",
+  "emoji": "🐫",
+  "family": null,
+  "ep": 364,
+  "prob": "27.5%"
+ },
+ {
+  "id": "HOPSCOTCH",
+  "label": "Hopscotch",
+  "desc": "A digit appears at every other position (2 times).",
+  "emoji": "🦘",
+  "family": null,
+  "ep": 312,
+  "prob": "32.0%"
+ },
+ {
+  "id": "GHOST",
+  "label": "Ghost",
+  "desc": "Contains exactly one \"0\".",
+  "emoji": "👻",
+  "family": null,
+  "ep": 309,
+  "prob": "32.4%"
+ },
+ {
+  "id": "QUARTET",
+  "label": "Quartet",
+  "desc": "Uses exactly four different digits.",
+  "emoji": "🎻",
+  "family": null,
+  "ep": 290,
+  "prob": "34.5%"
+ },
+ {
+  "id": "HYDROGEN",
+  "label": "Hydrogen (1)",
+  "desc": "Contains exactly one \"1\".",
+  "emoji": "💧",
+  "family": null,
+  "ep": 282,
+  "prob": "35.4%"
+ },
+ {
+  "id": "HELIUM",
+  "label": "Helium (2)",
+  "desc": "Contains exactly one \"2\".",
+  "emoji": "🎈",
+  "family": null,
+  "ep": 282,
+  "prob": "35.4%"
+ },
+ {
+  "id": "CARBON",
+  "label": "Carbon (6)",
+  "desc": "Contains exactly one \"6\".",
+  "emoji": "✏️",
+  "family": null,
+  "ep": 282,
+  "prob": "35.4%"
+ },
+ {
+  "id": "OXYGEN",
+  "label": "Oxygen (8)",
+  "desc": "Contains exactly one \"8\".",
+  "emoji": "💨",
+  "family": null,
+  "ep": 282,
+  "prob": "35.4%"
+ },
+ {
+  "id": "LITHIUM",
+  "label": "Lithium (3)",
+  "desc": "Contains exactly one \"3\".",
+  "emoji": "🔋",
+  "family": null,
+  "ep": 282,
+  "prob": "35.4%"
+ },
+ {
+  "id": "BERYLLIUM",
+  "label": "Beryllium (4)",
+  "desc": "Contains exactly one \"4\".",
+  "emoji": "💎",
+  "family": null,
+  "ep": 282,
+  "prob": "35.4%"
+ },
+ {
+  "id": "BORON",
+  "label": "Boron (5)",
+  "desc": "Contains exactly one \"5\".",
+  "emoji": "🧼",
+  "family": null,
+  "ep": 282,
+  "prob": "35.4%"
+ },
+ {
+  "id": "NITROGEN",
+  "label": "Nitrogen (7)",
+  "desc": "Contains exactly one \"7\".",
+  "emoji": "❄️",
+  "family": null,
+  "ep": 282,
+  "prob": "35.4%"
+ },
+ {
+  "id": "FLUORINE",
+  "label": "Fluorine (9)",
+  "desc": "Contains exactly one \"9\".",
+  "emoji": "🦷",
+  "family": null,
+  "ep": 282,
+  "prob": "35.4%"
+ },
+ {
+  "id": "GROUNDED",
+  "label": "Grounded",
+  "desc": "The first digit is smaller than the last.",
+  "emoji": "⚓",
+  "family": null,
+  "ep": 250,
+  "prob": "40.0%"
+ },
+ {
+  "id": "CONTIGUOUS_PAIR",
+  "label": "Contiguous Pair",
+  "desc": "Contains a contiguous pair of matching digits.",
+  "emoji": "🫂",
+  "family": null,
+  "ep": 249,
+  "prob": "40.2%"
+ },
+ {
+  "id": "LUCKY_7",
+  "label": "Lucky Seven",
+  "desc": "Contains the number 7.",
+  "emoji": "7️⃣",
+  "family": null,
+  "ep": 213,
+  "prob": "46.9%"
+ },
+ {
+  "id": "EVEN",
+  "label": "Even",
+  "desc": "Divisible by 2.",
+  "emoji": "⚖️",
+  "family": null,
+  "ep": 200,
+  "prob": "50.0%"
+ },
+ {
+  "id": "ODD",
+  "label": "Odd",
+  "desc": "Not divisible by 2.",
+  "emoji": "🦄",
+  "family": null,
+  "ep": 200,
+  "prob": "50.0%"
+ },
+ {
+  "id": "LIFTOFF",
+  "label": "Liftoff",
+  "desc": "The first digit is larger than the last.",
+  "emoji": "🚀",
+  "family": null,
+  "ep": 200,
+  "prob": "50.0%"
+ },
+ {
+  "id": "VOID",
+  "label": "Void",
+  "desc": "Contains no zeros.",
+  "emoji": "🕳️",
+  "family": null,
+  "ep": 167,
+  "prob": "59.8%"
+ },
+ {
+  "id": "NEIGHBORS",
+  "label": "Neighbors",
+  "desc": "Contains two digits that are adjacent in value.",
+  "emoji": "🏘️",
+  "family": null,
+  "ep": 161,
+  "prob": "62.1%"
+ },
+ {
+  "id": "PAIR",
+  "label": "Pair",
+  "desc": "Contains a pair of matching digits.",
+  "emoji": "👯",
+  "family": null,
+  "ep": 120,
+  "prob": "83.1%"
+ },
+ {
+  "id": "SIX_DIGITS",
+  "label": "Six Digits",
+  "desc": "Has exactly six digits.",
+  "emoji": "🐝",
+  "family": null,
+  "ep": 111,
+  "prob": "90.0%"
+ }
+]

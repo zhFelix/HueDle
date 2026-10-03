@@ -1,0 +1,215 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+import { STORAGE_KEYS, clearLocalData, clearLocalHistory, isRevealedToday, loadHistory, loadRevealedMarker, loadTodayResult, saveRevealedMarker, saveTodayResult } from './storage';
+import type { HistoryItem } from './storage';
+
+const item: HistoryItem = {
+  date: '2026-03-04',
+  hex: '#002FA7',
+  cp: 12345,
+  rarity: 'rare',
+  badgeIds: ['culture-klein-blue'],
+};
+
+function writeDaily(raw: string): void {
+  localStorage.setItem(STORAGE_KEYS.daily, raw);
+}
+
+function writeHistory(raw: string): void {
+  localStorage.setItem(STORAGE_KEYS.history, raw);
+}
+
+describe('loadTodayResult — 脏数据一律当作空值，绝不抛', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('无缓存 → null', () => {
+    expect(loadTodayResult('2026-03-04')).toBeNull();
+  });
+
+  it.each([
+    ['非 JSON', 'not-json{{{'],
+    ['字面量 null', 'null'],
+    ['JSON 数组', '[1,2,3]'],
+    ['空字符串', ''],
+    ['字段缺失（没有 badgeIds）', '{"date":"2026-03-04","hex":"#002FA7","cp":10,"rarity":"rare"}'],
+    ['cp 是字符串', '{"date":"2026-03-04","hex":"#002FA7","cp":"12345","rarity":"rare","badgeIds":[]}'],
+    ['cp 是 NaN', '{"date":"2026-03-04","hex":"#002FA7","cp":null,"rarity":"rare","badgeIds":[]}'],
+    ['rarity 不在 7 档内', '{"date":"2026-03-04","hex":"#002FA7","cp":10,"rarity":"legendary","badgeIds":[]}'],
+    ['hex 格式不对', '{"date":"2026-03-04","hex":"blue","cp":10,"rarity":"rare","badgeIds":[]}'],
+    ['date 格式不对', '{"date":"03/04/2026","hex":"#002FA7","cp":10,"rarity":"rare","badgeIds":[]}'],
+    ['badgeIds 不是数组', '{"date":"2026-03-04","hex":"#002FA7","cp":10,"rarity":"rare","badgeIds":"x"}'],
+    ['版本不符', '{"v":99,"date":"2026-03-04","hex":"#002FA7","cp":10,"rarity":"rare","badgeIds":[]}'],
+  ])('%s → null', (_label, raw) => {
+    writeDaily(raw);
+
+    expect(() => loadTodayResult('2026-03-04')).not.toThrow();
+    expect(loadTodayResult('2026-03-04')).toBeNull();
+  });
+
+  it('缓存日期不是今天（跨天）→ null', () => {
+    saveTodayResult(item);
+
+    expect(loadTodayResult('2026-03-05')).toBeNull();
+    expect(loadTodayResult('2026-03-04')).toEqual(item);
+  });
+
+  it('合法缓存被去壳归一化（丢掉未知字段，hex 转大写）', () => {
+    writeDaily(
+      '{"v":1,"date":"2026-03-04","hex":"#002fa7","cp":10,"rarity":"trash","badgeIds":[],"junk":1}',
+    );
+
+    expect(loadTodayResult('2026-03-04')).toEqual({
+      date: '2026-03-04',
+      hex: '#002FA7',
+      cp: 10,
+      rarity: 'trash',
+      badgeIds: [],
+    });
+  });
+});
+
+describe('saveTodayResult — 同一天幂等', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('连续保存同一天 N 次，history 里该日期只有 1 条', () => {
+    for (let i = 0; i < 5; i += 1) {
+      saveTodayResult({ ...item, cp: item.cp + i });
+    }
+
+    const history = loadHistory();
+    expect(history).toHaveLength(1);
+    expect(history[0]?.date).toBe('2026-03-04');
+    expect(history[0]?.cp).toBe(item.cp + 4); // 后写覆盖先写
+  });
+
+  it('非法 item 被拒绝写入（历史与今日缓存都不变）', () => {
+    saveTodayResult({ ...item, cp: Number.NaN });
+    saveTodayResult({ ...item, rarity: 'legendary' as never });
+
+    expect(loadTodayResult('2026-03-04')).toBeNull();
+    expect(loadHistory()).toEqual([]);
+  });
+});
+
+describe('loadHistory — 降序 + 逐条容错', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('按日期降序返回', () => {
+    saveTodayResult({ ...item, date: '2026-03-04' });
+    saveTodayResult({ ...item, date: '2026-03-06' });
+    saveTodayResult({ ...item, date: '2026-03-05' });
+
+    expect(loadHistory().map(entry => entry.date)).toEqual([
+      '2026-03-06',
+      '2026-03-05',
+      '2026-03-04',
+    ]);
+  });
+
+  it.each([
+    ['非 JSON', 'not-json'],
+    ['对象而非数组', '{"version":1,"items":[]}'],
+    ['字面量 null', 'null'],
+  ])('%s → []', (_label, raw) => {
+    writeHistory(raw);
+
+    expect(() => loadHistory()).not.toThrow();
+    expect(loadHistory()).toEqual([]);
+  });
+
+  it('坏记录只丢自己，同日重复只留一条', () => {
+    writeHistory(
+      JSON.stringify([
+        { v: 1, date: '2026-03-04', hex: '#002FA7', cp: 1, rarity: 'trash', badgeIds: [] },
+        { v: 1, date: '2026-03-04', hex: '#FFFFFF', cp: 2, rarity: 'common', badgeIds: [] },
+        { v: 1, date: '2026-03-05', hex: '#FFFFFF', cp: '2', rarity: 'common', badgeIds: [] },
+        { v: 3, date: '2026-03-06', hex: '#FFFFFF', cp: 2, rarity: 'common', badgeIds: [] },
+        null,
+        'oops',
+      ]),
+    );
+
+    expect(loadHistory()).toEqual([
+      { date: '2026-03-04', hex: '#002FA7', cp: 1, rarity: 'trash', badgeIds: [] },
+    ]);
+  });
+});
+
+describe('clearLocalData', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('清空全部 6 个 key', () => {
+    localStorage.setItem(STORAGE_KEYS.anonymousId, 'a');
+    localStorage.setItem(STORAGE_KEYS.token, 't');
+    saveTodayResult(item);
+    localStorage.setItem(STORAGE_KEYS.streak, '3');
+    saveRevealedMarker('user-1', '2026-03-04');
+
+    clearLocalData();
+
+    for (const key of Object.values(STORAGE_KEYS)) {
+      expect(localStorage.getItem(key)).toBeNull();
+    }
+  });
+});
+
+/**
+ * `huedle:revealed` 是**登录模式唯一会写的记录类 key**（DESIGN 第 11 节）。
+ * 它必须与本地模式的三个记录键完全隔离，且按 userId 区分。
+ */
+describe('已揭晓标记（huedle:revealed）', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('无标记 → null / false', () => {
+    expect(loadRevealedMarker()).toBeNull();
+    expect(isRevealedToday('user-1', '2026-03-04')).toBe(false);
+  });
+
+  it('写入后按 (userId, date) 命中，其它账户 / 其它日期不命中', () => {
+    saveRevealedMarker('user-1', '2026-03-04');
+
+    expect(loadRevealedMarker()).toEqual({ userId: 'user-1', date: '2026-03-04' });
+    expect(isRevealedToday('user-1', '2026-03-04')).toBe(true);
+    expect(isRevealedToday('user-2', '2026-03-04')).toBe(false);
+    expect(isRevealedToday('user-1', '2026-03-05')).toBe(false);
+  });
+
+  it('写入标记**不会**顺带写本地模式的三个记录键', () => {
+    saveRevealedMarker('user-1', '2026-03-04');
+
+    expect(localStorage.getItem(STORAGE_KEYS.daily)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.history)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.streak)).toBeNull();
+  });
+
+  it.each([
+    ['非 JSON', 'not-json'],
+    ['数组', '[]'],
+    ['缺 date', '{"userId":"user-1"}'],
+    ['date 格式不对', '{"userId":"user-1","date":"03/04/2026"}'],
+    ['userId 为空串', '{"userId":"","date":"2026-03-04"}'],
+  ])('脏数据（%s）→ 视为无标记，绝不抛', (_label, raw) => {
+    localStorage.setItem(STORAGE_KEYS.revealed, raw);
+
+    expect(() => loadRevealedMarker()).not.toThrow();
+    expect(loadRevealedMarker()).toBeNull();
+    expect(isRevealedToday('user-1', '2026-03-04')).toBe(false);
+  });
+
+  it('clearLocalHistory 不清标记（它是登录态，不是本地记录）', () => {
+    saveRevealedMarker('user-1', '2026-03-04');
+
+    clearLocalHistory();
+
+    expect(loadRevealedMarker()).toEqual({ userId: 'user-1', date: '2026-03-04' });
+  });
+});

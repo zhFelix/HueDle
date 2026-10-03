@@ -1,0 +1,11 @@
+{
+  "name": "huedle",
+  "version": "0.0.0",
+  "private": true,
+  "description": "HueDle — 猜颜色 / 徽章收集游戏（monorepo 根）",
+  "packageManager": "pnpm@12.8.1",
+  "scripts": {
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  }
+}
