@@ -242,7 +242,7 @@ describe('login / registerUser / logout', () => {
     clearSessionOnUnauthorized();
 
     expect(store.isLoggedIn).toBe(false);
-    expect(store.notice).toContain('本地模式');
+    expect(store.notice).toContain('登录状态已失效');
     // 只打了一次 me，没有额外的 logout 请求
     expect(calls).toHaveLength(1);
 

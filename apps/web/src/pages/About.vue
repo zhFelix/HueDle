@@ -10,7 +10,7 @@ import { RARITY_ORDER, rarityStyle } from '../lib/rarity';
     <section class="space-y-2 rounded-2xl border border-ink-700 bg-ink-900 p-5 text-sm text-neutral-300">
       <h2 class="font-semibold text-neutral-100">每日一色</h2>
       <p>每天 00:00 UTC，每位玩家独立获得一种 24 位真彩色。</p>
-      <p>本地模式跟着这台设备；登录后跟着账户。</p>
+      <p>不登录时颜色跟着这台设备；登录后跟着账户。</p>
     </section>
 
     <section class="space-y-2 rounded-2xl border border-ink-700 bg-ink-900 p-5 text-sm text-neutral-300">

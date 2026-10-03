@@ -81,7 +81,7 @@ export const useSessionStore = defineStore('session', () => {
    */
   const hydrated = ref(token.value === null || cachedIdentity !== null);
   /**
-   * 全局一次性提示（如「登录状态已失效，已切换回本地模式」）。
+   * 全局一次性提示（如「登录状态已失效」）。
    *
    * 放在 store 而不是 composable 里：401 回退会让 `App.vue` 按模式重建路由内容，
    * composable 实例随之销毁——提示必须活得比它久。由 `App.vue` 统一展示。
@@ -283,7 +283,7 @@ export function clearSessionOnUnauthorized(): void {
   if (!pinia) return;
   const store = useSessionStore(pinia);
   store.clearSession();
-  store.setNotice('登录状态已失效，已切换回本地模式。');
+  store.setNotice('登录状态已失效。');
 }
 
 /** 当前的一次性提示（响应式读取；无 Pinia 时返回 null）。 */

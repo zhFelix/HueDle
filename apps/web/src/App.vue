@@ -15,7 +15,6 @@ const links = [
 ];
 
 const isLoggedIn = computed(() => session.isLoggedIn);
-const modeLabel = computed(() => (isLoggedIn.value ? '登录模式' : '本地模式'));
 const currentTitle = computed(() => String(route.meta.title ?? 'HueDle'));
 
 /**
@@ -39,10 +38,6 @@ onMounted(() => {
           Hue<span class="text-amber-400">Dle</span>
         </RouterLink>
         <div class="flex items-center gap-3">
-          <span class="rounded-full border border-ink-700 px-3 py-1 text-xs text-neutral-400">
-            {{ modeLabel }}
-          </span>
-
           <!--
             身份管理（登出 / 登录入口）已移到「我的」页；头部只留一个明显的入口，
             保证未登录的用户一眼能看到怎么登录，不会"找不到登录"。

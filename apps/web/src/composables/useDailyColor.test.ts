@@ -462,7 +462,7 @@ describe('useDailyColor — 登录模式', () => {
     expect(store.token).toBeNull();
     expect(localStorage.getItem(STORAGE_KEYS.token)).toBeNull();
 
-    expect(play.notice.value).toContain('本地模式');
+    expect(play.notice.value).toContain('登录状态已失效');
     expect(play.error.value).toBeNull();
     // 回退后拿到的是本地身份（匿名 ID）的今日颜色
     expect(play.color.value?.hex).toBe(expected.hex);

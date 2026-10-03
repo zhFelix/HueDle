@@ -101,9 +101,6 @@ async function handleLogout(): Promise<void> {
         已登录为
         <span class="font-mono text-neutral-50">{{ session.userName ?? session.userId }}</span>
       </p>
-      <p class="mt-2 text-xs text-neutral-500">
-        退出后自动回到本地模式，本地历史与今日结果原样恢复。
-      </p>
       <div class="mt-4">
         <button
           type="button"

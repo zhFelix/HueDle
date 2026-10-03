@@ -63,7 +63,7 @@ function confirmClear(): void {
       <div class="flex flex-wrap items-center justify-between gap-3">
         <template v-if="session.isLoggedIn">
           <div>
-            <p class="text-xs uppercase tracking-widest text-neutral-500">登录模式</p>
+            <p class="text-xs uppercase tracking-widest text-neutral-500">已登录</p>
             <p class="mt-1 font-mono text-lg text-neutral-50">
               {{ session.userName ?? session.userId }}
             </p>
@@ -79,9 +79,9 @@ function confirmClear(): void {
 
         <template v-else>
           <div>
-            <p class="text-xs uppercase tracking-widest text-neutral-500">本地模式</p>
+            <p class="text-xs uppercase tracking-widest text-neutral-500">未登录</p>
             <p class="mt-1 text-sm text-neutral-300">
-              登录后，颜色和历史在任何设备上都能看到。
+              记录只在这台设备上——换设备或清理浏览器数据就会丢。
             </p>
           </div>
           <RouterLink

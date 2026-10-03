@@ -30,6 +30,7 @@ const FORBIDDEN: ReadonlyArray<readonly [RegExp, string]> = [
   [/不并入|并入账户|合并到账户/, '解释「历史迁移」——一个我们没做、玩家也没问的功能'],
   [/两种模式抽到|不同的颜色/, '解释两种模式为何颜色不同（实现细节）'],
   [/每个身份每天一次|切换身份/, '背诵内部规则'],
+  [/本地模式|登录模式/, '内部模式名——用「已登录 / 未登录」这类状态词'],
 
   // ② 背诵禁令 / 免责
   [/不能重抽|不能购买|不能追加/, '背诵禁令'],
@@ -44,10 +45,17 @@ const FORBIDDEN: ReadonlyArray<readonly [RegExp, string]> = [
   [/全色域|枚举|2²⁴|ep\s*=|fnv1a/i, '内部算法'],
 ];
 
-/** 取出顶层 `<template>` 块。用行首锚点，避免被缩进的嵌套 `<template v-if>` 干扰。 */
+/**
+ * 取出顶层 `<template>` 块，**并剥掉 HTML 注释**。
+ *
+ * 用行首锚点，避免被缩进的嵌套 `<template v-if>` 干扰。
+ * 注释必须剥掉：模板注释与 `<script>` 注释一样是写给维护者的，
+ * 里面正当地讨论「本地模式 / 登录模式 / 存储键」，不该受文案规则约束。
+ */
 function templateOf(source: string): string | null {
   const m = /^<template>[\s\S]*?^<\/template>/m.exec(source);
-  return m ? m[0] : null;
+  if (!m) return null;
+  return m[0].replace(/<!--[\s\S]*?-->/g, '');
 }
 
 describe('UI 文案红线', () => {

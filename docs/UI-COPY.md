@@ -34,6 +34,7 @@ pnpm -C apps/web test src/ui-copy.test.ts
 | ❌ 反面例子 | 问题 |
 |---|---|
 | `localStorage` / `badgeIds` / `HistoryItem` | 存储与类型名 |
+| 「本地模式」「登录模式」 | 内部模式名。玩家只关心**自己现在登没登录**，不关心我们把状态叫第几种模式 |
 | `useDailyColor()` / `getDaily()` | 函数名 |
 | `ep = 100 / p`、`2²⁴ 全色域枚举`、`fnv1a` | 算法细节属于 `docs/` |
 
@@ -99,4 +100,6 @@ pnpm -C apps/web test src/ui-copy.test.ts
 - 正则只能拦**已知措辞**，拦不住**新写的**。加红线是滞后的：
   每次改完界面，**把页面实际渲染的文字拉出来读一遍**（`document.body.innerText`），
   比只看正则可靠。发现新的坏措辞就补进 `FORBIDDEN`，并做一次变异验证。
+- 模板里的 `<!-- 注释 -->` 会被剥掉后再检查，`<script>` 注释根本不扫——
+  这两处都可以正常讨论机制与模式名。
 - 正则也拦不住**语气**。措辞干净但居高临下的句子，仍然要靠人看。
