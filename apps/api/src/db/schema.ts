@@ -45,4 +45,41 @@ CREATE TABLE IF NOT EXISTS daily_results (
 
 CREATE INDEX IF NOT EXISTS idx_daily_user_date ON daily_results(user_id, date);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 锁死 Data API 的访问（**安全关键，不要删**）
+--
+-- Supabase 在 public schema 上设了 ALTER DEFAULT PRIVILEGES，任何新建的表都会
+-- 自动 GRANT ALL 给 anon / authenticated。而 PostgREST 会把这些表直接暴露成
+--   GET https://<ref>.supabase.co/rest/v1/users?select=*
+-- 于是只要拿到公开的 anon key，就能拖走 users.password_hash 与 sessions.token_hash，
+-- 甚至 TRUNCATE 整张表。实测过：三张表对 anon 都有 SELECT/INSERT/UPDATE/DELETE/TRUNCATE。
+--
+-- 我们的架构里客户端**从不直连数据库**（所有读写都经过 Hono API，用 postgres 角色），
+-- 所以 anon / authenticated 必须被彻底挡掉。两层防御：
+--   1) ENABLE ROW LEVEL SECURITY 且**不建任何 policy** → 默认拒绝；
+--      表属主（postgres）默认绕过 RLS，因此我们自己的 API 不受影响；
+--   2) REVOKE 掉这两类角色的全部权限 → 即使 RLS 被误关也进不来。
+--
+-- 这两条必须留在 migrate 里：手工修一次没用，下次建表又会被自动授权回去。
+-- 用 DO 块是因为普通 Postgres（CI 里跑的）没有 anon / authenticated 这两个角色，
+-- 直接 REVOKE 会报错。
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE users         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sessions      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE daily_results ENABLE ROW LEVEL SECURITY;
+
+DO $$
+DECLARE
+  r text;
+  t text;
+BEGIN
+  FOREACH r IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+      FOREACH t IN ARRAY ARRAY['users', 'sessions', 'daily_results'] LOOP
+        EXECUTE format('REVOKE ALL ON TABLE %I FROM %I', t, r);
+      END LOOP;
+    END IF;
+  END LOOP;
+END $$;
 `;
