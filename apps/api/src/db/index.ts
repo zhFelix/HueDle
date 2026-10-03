@@ -12,7 +12,7 @@ import { Pool } from 'pg';
 
 export { SCHEMA_SQL } from './schema';
 export { Store } from './store';
-export type { DailyRow, NewDaily, NewUser, SessionRow, UserRow } from './store';
+export type { DailyRow, NewDaily, NewUser, SessionRow, SessionWithUser, UserRow } from './store';
 
 /** 单进程默认连接上限。 */
 export const DEFAULT_POOL_MAX = 10;

@@ -23,6 +23,17 @@ export type SessionRow = {
   expires_at: string;
 };
 
+/**
+ * 认证中间件需要的**全部**信息：会话 + 对应用户。
+ *
+ * 字段名用 camelCase（不是行原样），因为这是「一次 JOIN 的结果」而不是某张表的行。
+ */
+export type SessionWithUser = {
+  userId: string;
+  name: string;
+  expiresAt: string;
+};
+
 export type DailyRow = {
   id: number;
   user_id: string;
@@ -137,6 +148,38 @@ export class Store {
 
   async findSession(tokenHash: string): Promise<SessionRow | undefined> {
     return this.one<SessionRow>('SELECT * FROM sessions WHERE token_hash = $1', [tokenHash]);
+  }
+
+  /**
+   * 认证专用：**一条 JOIN** 同时取回会话与用户，替代「先 findSession 再 findUserById」的两次往返。
+   *
+   * ```sql
+   * SELECT u.id AS id, u.name AS name, s.expires_at AS expires_at
+   *   FROM sessions s JOIN users u ON u.id = s.user_id
+   *  WHERE s.token_hash = $1
+   * ```
+   *
+   * 语义与两次独立查询**完全等价**（sessions.user_id 外键 + ON DELETE CASCADE，
+   * 所以「会话存在但用户不存在」这种孤儿行在库里根本不可能出现；JOIN 查不到 = 会话不存在
+   * 或用户已随级联删除一起消失，两者本来就都走 401）。
+   *
+   * ⚠️ **不要在这里加缓存（Redis / 进程内 Map / any TTL 都不行）。**
+   * 登出即时失效是我们当初选「服务端 Session」而不是 JWT 的**唯一**理由：
+   * 一旦把认证结果缓存哪怕几秒，用户登出后旧 token 仍能继续访问，等于把这个理由还回去。
+   * 每次请求都必须真的打到 sessions 表。
+   *
+   * 保留 {@link findSession} / {@link findUserById}：别处与测试仍在用。
+   */
+  async findSessionWithUser(tokenHash: string): Promise<SessionWithUser | undefined> {
+    const row = await this.one<{ id: string; name: string; expires_at: string }>(
+      `SELECT u.id AS id, u.name AS name, s.expires_at AS expires_at
+         FROM sessions s
+         JOIN users u ON u.id = s.user_id
+        WHERE s.token_hash = $1`,
+      [tokenHash],
+    );
+    if (!row) return undefined;
+    return { userId: row.id, name: row.name, expiresAt: row.expires_at };
   }
 
   async deleteSession(tokenHash: string): Promise<void> {

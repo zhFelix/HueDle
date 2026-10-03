@@ -30,7 +30,28 @@ export const STORAGE_KEYS = {
    * 它按 userId 区分，因此同一天切换账户不会串味。
    */
   revealed: 'huedle:revealed',
+  /**
+   * 登录模式的身份缓存 `{ userId, userName }`。
+   *
+   * **只用于首屏显示**：启动时先用它把界面渲染成登录态，后台再调
+   * `GET /api/auth/me` 核对。它**绝不参与任何授权判定**——token 是否有效
+   * 一律以服务端为准（见 `stores/session.ts` 的 `hydrate()`）。
+   */
+  identity: 'huedle:identity',
+  /**
+   * 登录模式今日结果缓存的前缀。完整 key 为 `huedle:daily:user:<userId>`，
+   * 按用户分键，因此同一天切换账户不会串味。
+   *
+   * 刻意与本地模式专属的 `huedle:daily` 使用完全不同的 key：
+   * 登录模式只写这个前缀下的键，登出后本地数据原样恢复（DESIGN 11.3）。
+   */
+  userDailyPrefix: 'huedle:daily:user:',
 } as const;
+
+/** 登录模式今日结果缓存的完整 key：`huedle:daily:user:<userId>`。 */
+export function userDailyKey(userId: string): string {
+  return `${STORAGE_KEYS.userDailyPrefix}${userId}`;
+}
 
 /** 当前写入版本。读取时 `v !== STORAGE_VERSION` 的记录一律丢弃。 */
 export const STORAGE_VERSION = 1;
@@ -292,6 +313,113 @@ export function isRevealedToday(userId: string, date: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// 登录模式的今日结果缓存（按用户分键）`huedle:daily:user:<userId>`
+// ---------------------------------------------------------------------------
+
+/** 非负整数才认；其余（缺字段 / 脏值）一律回落 0。 */
+function normalizeStreak(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+/** 缓存下来的今日结果：`HistoryItem` + 服务端随 `/api/daily` 下发的连续天数。 */
+export interface UserDailyRecord extends HistoryItem {
+  streak: number;
+}
+
+/**
+ * 读取某账户某一天的今日结果缓存。
+ *
+ * 有效性判定用 `date` 字段（**跨天自然失效**），不用时间戳 TTL——
+ * 服务端的今日结果当天冻结，所以「同一天」就是正确的有效期。
+ * 不属于该日期 / 脏数据 → `null`（调用方据此走服务端）。
+ */
+export function loadUserDaily(userId: string, date: string): UserDailyRecord | null {
+  if (!userId) return null;
+
+  const parsed = parseJson(safeGet(userDailyKey(userId)));
+  if (!isHistoryItem(parsed)) return null;
+  if (parsed.date !== date) return null;
+
+  const { streak } = parsed as HistoryItem & { streak?: unknown };
+  return { ...normalize(parsed), streak: normalizeStreak(streak) };
+}
+
+/**
+ * 写入某账户的今日结果缓存（**不追加历史**，只存这一条）。
+ *
+ * 这是登录模式除 token / identity / revealed 之外唯一会写的记录类 key，
+ * 且 key 带 userId，与本地模式的 `huedle:daily` 天然隔离。
+ */
+export function saveUserDaily(userId: string, item: HistoryItem, streak: number): void {
+  if (!userId || !isHistoryItem(item)) return;
+
+  const record = { v: STORAGE_VERSION, ...normalize(item), streak: normalizeStreak(streak) };
+  safeSet(userDailyKey(userId), JSON.stringify(record));
+}
+
+/** 删掉某账户的今日结果缓存（登出 / 401 回退 / 缓存脏时调用）。 */
+export function clearUserDaily(userId: string): void {
+  if (!userId) return;
+  safeRemove(userDailyKey(userId));
+}
+
+/** 删掉**所有**账户的今日结果缓存（前缀扫描；`clearLocalData` 用）。 */
+function clearAllUserDaily(): void {
+  try {
+    const storage = globalThis.localStorage;
+    if (!storage) return;
+
+    const doomed: string[] = [];
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (key !== null && key.startsWith(STORAGE_KEYS.userDailyPrefix)) doomed.push(key);
+    }
+    for (const key of doomed) storage.removeItem(key);
+  } catch {
+    /* 存储不可用：没有可清的东西 */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 登录模式的身份缓存 `huedle:identity`
+// ---------------------------------------------------------------------------
+
+/**
+ * `{ userId, userName }`：**只用于首屏显示**的登录身份缓存。
+ *
+ * 它让「已登录用户重复访问」可以立刻按登录模式渲染，不必等 `GET /api/auth/me`
+ * 落地；但 token 是否有效**永远由服务端判定**，本缓存不参与授权决策。
+ */
+export interface CachedIdentity {
+  userId: string;
+  userName: string;
+}
+
+function isCachedIdentity(value: unknown): value is CachedIdentity {
+  if (!isRecord(value)) return false;
+  const { userId, userName } = value;
+  return typeof userId === 'string' && userId.length > 0 && typeof userName === 'string';
+}
+
+/** 读取身份缓存；结构不符（缺字段 / 类型不对 / 空 userId）一律视为 null。 */
+export function loadIdentity(): CachedIdentity | null {
+  const parsed = parseJson(safeGet(STORAGE_KEYS.identity));
+  if (!isCachedIdentity(parsed)) return null;
+  return { userId: parsed.userId, userName: parsed.userName };
+}
+
+/** 写入身份缓存（登录 / 注册成功、以及 `hydrate()` 用服务端结果覆盖时调用）。 */
+export function saveIdentity(userId: string, userName: string): void {
+  if (!userId) return;
+  safeSet(STORAGE_KEYS.identity, JSON.stringify({ userId, userName } satisfies CachedIdentity));
+}
+
+/** 清掉身份缓存（登出 / 401 回退时调用）。 */
+export function clearIdentity(): void {
+  safeRemove(STORAGE_KEYS.identity);
+}
+
+// ---------------------------------------------------------------------------
 // 清空
 // ---------------------------------------------------------------------------
 
@@ -309,7 +437,10 @@ export function clearLocalHistory(): void {
   safeRemove(STORAGE_KEYS.streak);
 }
 
-/** 清空全部本地数据（含匿名 ID；匿名 ID 被清掉等于换了一个"人"，会重新抽到今天的颜色）。 */
+/**
+ * 清空全部本地数据（含匿名 ID 与登录态缓存；匿名 ID 被清掉等于换了一个"人"，
+ * 会重新抽到今天的颜色）。
+ */
 export function clearLocalData(): void {
   safeRemove(STORAGE_KEYS.daily);
   safeRemove(STORAGE_KEYS.history);
@@ -317,4 +448,6 @@ export function clearLocalData(): void {
   safeRemove(STORAGE_KEYS.token);
   safeRemove(STORAGE_KEYS.anonymousId);
   safeRemove(STORAGE_KEYS.revealed);
+  safeRemove(STORAGE_KEYS.identity);
+  clearAllUserDaily();
 }

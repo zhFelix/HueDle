@@ -20,10 +20,12 @@ const modeLabel = computed(() => (isLoggedIn.value ? '登录模式' : '本地模
 const currentTitle = computed(() => String(route.meta.title ?? 'HueDle'));
 
 /**
- * 启动时用 token 补回 userId（规则 2）。
+ * 后台核对登录态（规则 2）。
  *
- * 有 token 时 `session.hydrated` 初始为 false，路由内容延后到身份补回之后再渲染，
- * 避免子组件在「看似未登录」时读成本地模式；`/api/auth/me` 返回 401 则清 token 回本地。
+ * 首屏**不再等它**：有 `huedle:identity` 缓存时 store 初始化就用缓存身份按登录模式
+ * 渲染，路由内容立即挂载；这里只负责在后台调 `GET /api/auth/me` 核对，
+ * 成功后用服务端结果覆盖缓存（用户名可能改过），401 则清 token + 身份缓存回本地。
+ * 身份变化会通过下方 RouterView 的 key 重建页面，页面数据随之切到正确的账户。
  */
 onMounted(() => {
   void session.hydrate();
@@ -103,13 +105,12 @@ async function handleLogout(): Promise<void> {
         </button>
       </p>
 
-      <!-- 身份未恢复前不渲染路由内容：避免子组件先把登录态读成本地模式 -->
-      <p v-if="!session.hydrated" class="text-sm text-neutral-500">正在恢复登录状态…</p>
       <!--
-        key 绑在登录态上：登录 / 登出后重建页面组件，页面数据源随之切换。
-        否则登出后历史页会继续显示账户数据（本页 composable 不会自己重读）。
+        key 绑在登录态 + userId 上：登录 / 登出 / 换账户后重建页面组件，页面数据源随之切换。
+        有身份缓存时不挡渲染——先用缓存身份挂载路由内容（0 请求），后台 `hydrate()` 核对；
+        核对结果若换了 userId（或 401 回退本地），key 变化会重建页面并重读正确的数据源。
       -->
-      <RouterView v-else :key="session.isLoggedIn ? 'user' : 'local'" />
+      <RouterView :key="session.isLoggedIn ? `user:${session.userId}` : 'local'" />
     </main>
   </div>
 </template>

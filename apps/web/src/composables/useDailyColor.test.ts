@@ -7,7 +7,9 @@ import {
   loadHistory,
   loadRevealedMarker,
   loadTodayResult,
+  loadUserDaily,
   saveRevealedMarker,
+  userDailyKey,
   type HistoryItem,
 } from '../lib/storage';
 import { apiErrorReply, installFetchMock } from '../test-utils/mock-fetch';
@@ -340,6 +342,11 @@ function mockServer(item: HistoryItem = SERVER_ITEM): ReturnType<typeof installF
   );
 }
 
+/** 手工写入登录模式的今日结果缓存（用字面 key，钉死 `huedle:daily:user:<userId>` 契约）。 */
+function seedUserDailyCache(userId: string, item: HistoryItem, streak: number): void {
+  localStorage.setItem(userDailyKey(userId), JSON.stringify({ v: 1, ...item, streak }));
+}
+
 describe('useDailyColor — 登录模式', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -429,23 +436,18 @@ describe('useDailyColor — 登录模式', () => {
     expect(play.revealed.value).toBe(false);
   });
 
-  it('连续天数复用服务端历史（与本地模式同一份 computeStreak）', async () => {
+  it('7. 连续天数直接来自 /api/daily 响应的 streak（不再调 /api/history）', async () => {
     loginAs();
-    installFetchMock(call =>
-      call.url.endsWith('/api/history')
-        ? {
-            body: [
-              { ...SERVER_ITEM, date: '2026-03-04' },
-              { ...SERVER_ITEM, date: '2026-03-03' },
-            ],
-          }
-        : { body: SERVER_ITEM },
-    );
+    const { calls } = installFetchMock(() => ({ body: { ...SERVER_ITEM, streak: 5 } }));
 
     const play = useDailyColor({ date: DAY_1 });
     await play.load();
 
-    expect(play.streak.value).toBe(2);
+    expect(play.streak.value).toBe(5);
+    // 只有 1 次请求，且是 /api/daily —— 多余的 /api/history 已经被去掉
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url.endsWith('/api/daily')).toBe(true);
+    expect(calls.some(call => call.url.endsWith('/api/history'))).toBe(false);
   });
 
   it('401 → 清 session、回退本地模式并给出提示（不卡在登录态）', async () => {
@@ -500,5 +502,147 @@ describe('useDailyColor — 登录模式', () => {
 
     expect(play.error.value).toBeTruthy();
     expect(play.color.value).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 登录模式缓存（任务 A / B / C）
+//
+//   A：按用户分键的 `huedle:daily:user:<userId>`，命中即 0 请求，以 `date` 判有效期；
+//   B：`huedle:identity` 只用于首屏显示，后台仍会用 `GET /api/auth/me` 核对；
+//   C：`streak` 取自 `/api/daily` 响应，不再额外调 `/api/history`。
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('useDailyColor — 登录模式缓存（A / B / C）', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('1. 重复访问 0 请求：缓存命中 → load() 一个 fetch 都不发，渲染与缓存一致', async () => {
+    loginAs();
+    seedUserDailyCache('u1', SERVER_ITEM, 4);
+    // 任何 fetch 都算失败：命中缓存时 load() 不应该走网络。
+    const { calls, mock } = installFetchMock(() => {
+      throw new TypeError('缓存命中时不应发请求');
+    });
+
+    const play = useDailyColor({ date: DAY_1 });
+    await play.load();
+
+    expect(mock).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(0);
+    expect(play.error.value).toBeNull();
+    expect(play.color.value?.hex).toBe(SERVER_ITEM.hex);
+    expect(play.result.value?.cp).toBe(SERVER_ITEM.cp);
+    expect(play.result.value?.rarity).toBe(SERVER_ITEM.rarity);
+    expect(play.result.value?.scoringBadges.map(badge => badge.id)).toEqual(SERVER_ITEM.badgeIds);
+    expect(play.historyItem.value).toEqual(SERVER_ITEM);
+    expect(play.streak.value).toBe(4);
+  });
+
+  it('2. 缓存未命中才请求：清掉缓存 → 恰好 1 次 /api/daily', async () => {
+    loginAs();
+    expect(loadUserDaily('u1', '2026-03-04')).toBeNull();
+    const { calls } = mockServer();
+
+    const play = useDailyColor({ date: DAY_1 });
+    await play.load();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url.endsWith('/api/daily')).toBe(true);
+    expect(play.color.value?.hex).toBe(SERVER_ITEM.hex);
+  });
+
+  it('3. 跨天失效：缓存里的 date 是昨天 → 仍会去请求服务器', async () => {
+    loginAs();
+    seedUserDailyCache('u1', { ...SERVER_ITEM, date: '2026-03-03' }, 9);
+    const { calls } = mockServer();
+
+    const play = useDailyColor({ date: DAY_1 });
+    await play.load();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url.endsWith('/api/daily')).toBe(true);
+    // 缓存被新的一天覆盖，且不再残留旧日期
+    expect(loadUserDaily('u1', '2026-03-04')?.date).toBe('2026-03-04');
+  });
+
+  it('4. 按用户分键：用户 A 的缓存不会被用户 B 命中', async () => {
+    loginAs('u2', 'Bob');
+    seedUserDailyCache('u1', SERVER_ITEM, 4);
+    const { calls } = mockServer();
+
+    const play = useDailyColor({ date: DAY_1 });
+    await play.load();
+
+    // B 没命中 A 的缓存 → 走了服务端
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url.endsWith('/api/daily')).toBe(true);
+    // A 的缓存原样还在，且没有被 B 覆盖
+    expect(loadUserDaily('u1', '2026-03-04')?.cp).toBe(SERVER_ITEM.cp);
+  });
+
+  it('5. 本地键零污染：预置本地数据 → 登录模式 load()+reveal() 后三个 key 字节未变', async () => {
+    const seeded: Record<string, string> = {
+      [STORAGE_KEYS.daily]: JSON.stringify({
+        v: 1,
+        date: '2026-03-03',
+        hex: '#123456',
+        cp: 7,
+        rarity: 'common',
+        badgeIds: [],
+      }),
+      [STORAGE_KEYS.history]: JSON.stringify([
+        { v: 1, date: '2026-03-03', hex: '#123456', cp: 7, rarity: 'common', badgeIds: [] },
+      ]),
+      [STORAGE_KEYS.streak]: '1',
+    };
+    for (const [key, value] of Object.entries(seeded)) localStorage.setItem(key, value);
+
+    loginAs();
+    mockServer();
+    const play = useDailyColor({ date: DAY_1 });
+    await play.load();
+    await play.reveal();
+
+    // 字节级不变：登录模式写的是自己的 key，本地数据原封不动（DESIGN 11.3）
+    for (const key of LOCAL_KEYS) expect(localStorage.getItem(key)).toBe(seeded[key]);
+    // 登录模式写的确实是登录模式专属的键
+    expect(loadRevealedMarker()).toEqual({ userId: 'u1', date: '2026-03-04' });
+    expect(loadUserDaily('u1', '2026-03-04')).not.toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.identity)).not.toBeNull();
+  });
+
+  it('6. 缓存身份只影响显示：身份缓存 + 无效 token → 401 回退本地模式并清掉登录态缓存', async () => {
+    // 模拟"上次登录过的浏览器"：token 在、身份缓存在，但没有经过 setSession。
+    localStorage.setItem(STORAGE_KEYS.token, 'tok-expired');
+    localStorage.setItem(STORAGE_KEYS.identity, JSON.stringify({ userId: 'u1', userName: 'Alice' }));
+    // 故意连今日缓存也预置：命中缓存不能变成"免检授权"的理由。
+    seedUserDailyCache('u1', SERVER_ITEM, 4);
+
+    setActivePinia(createPinia());
+    const store = useSessionStore();
+    // 缓存身份先让界面按登录模式渲染（只影响显示）
+    expect(store.isLoggedIn).toBe(true);
+    expect(store.userId).toBe('u1');
+
+    const { calls } = installFetchMock(() => apiErrorReply(401, 'UNAUTHORIZED', '登录已过期'));
+    const play = useDailyColor({ date: DAY_1 });
+    await play.load(); // 缓存命中：load() 不发请求
+    expect(calls).toHaveLength(0);
+
+    // 后台核对（App.vue 的 hydrate）仍然发生 —— 缓存绝不跳过 token 校验
+    await store.hydrate();
+    expect(calls.filter(call => call.url.endsWith('/api/auth/me'))).toHaveLength(1);
+
+    expect(store.isLoggedIn).toBe(false);
+    expect(store.token).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.token)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.identity)).toBeNull();
+    expect(localStorage.getItem(userDailyKey('u1'))).toBeNull();
   });
 });

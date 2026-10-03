@@ -10,11 +10,24 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, isApiError } from '../lib/api';
-import { STORAGE_KEYS } from '../lib/storage';
+import { STORAGE_KEYS, loadIdentity, saveUserDaily, userDailyKey } from '../lib/storage';
 import { apiErrorReply, installFetchMock } from '../test-utils/mock-fetch';
 import { useSessionStore, clearSessionOnUnauthorized } from './session';
 
 const LOCAL_KEYS = [STORAGE_KEYS.daily, STORAGE_KEYS.history, STORAGE_KEYS.streak] as const;
+
+/** 预置一份身份缓存（模拟"上次登录过的浏览器"）。 */
+function seedIdentity(userId = 'u1', userName = 'Stale'): void {
+  localStorage.setItem(STORAGE_KEYS.identity, JSON.stringify({ userId, userName }));
+}
+
+const CACHED_DAILY = {
+  date: '2026-03-04',
+  hex: '#002FA7',
+  cp: 42,
+  rarity: 'common' as const,
+  badgeIds: ['culture-klein-blue'],
+};
 
 /** 预置一份"本地模式数据"，用来验证登录 / 登出全程不污染它。 */
 function seedLocalData(): Record<string, string> {
@@ -229,5 +242,83 @@ describe('login / registerUser / logout', () => {
     // 重新登录会清掉旧提示
     store.setSession('tok-bob', { id: 'u2', name: 'Bob' });
     expect(store.notice).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 身份缓存 `huedle:identity`（任务 B）
+//
+//   它让首屏立刻按登录模式渲染，**只用于显示**：只要 token 在，
+//   `hydrate()` 就一定会调 `GET /api/auth/me` 核对，绝不因缓存跳过授权校验。
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('身份缓存 huedle:identity — 只用于显示，不参与授权', () => {
+  it('登录 / 注册成功写入身份缓存；hydrate 成功用服务端结果覆盖', async () => {
+    installFetchMock(() => ({ body: { token: 'tok-a', user: { id: 'u1', name: 'Alice' } } }));
+
+    const store = useSessionStore();
+    await store.login('Alice', 'password123');
+
+    expect(loadIdentity()).toEqual({ userId: 'u1', userName: 'Alice' });
+  });
+
+  it('有身份缓存 → 立即按登录模式渲染，但 hydrate() 仍会调 /api/auth/me 核对', async () => {
+    localStorage.setItem(STORAGE_KEYS.token, 'tok-alice');
+    seedIdentity('u1', 'Stale');
+    const { calls } = installFetchMock(() => ({ body: { id: 'u1', name: 'Alice' } }));
+
+    const store = useSessionStore();
+    // 首屏不阻塞：缓存身份直接把界面渲染成登录态
+    expect(store.isLoggedIn).toBe(true);
+    expect(store.userId).toBe('u1');
+    expect(store.userName).toBe('Stale');
+
+    await expect(store.hydrate()).resolves.toBe(true);
+
+    // 关键：缓存没有让校验被跳过，me 确实打了一次
+    expect(calls.filter(call => call.url.endsWith('/api/auth/me'))).toHaveLength(1);
+    // 服务端的用户名覆盖了缓存（用户名可能改过）
+    expect(store.userName).toBe('Alice');
+    expect(loadIdentity()).toEqual({ userId: 'u1', userName: 'Alice' });
+  });
+
+  it('身份缓存 + 401 → 清 token、清身份缓存与今日缓存，回本地模式', async () => {
+    localStorage.setItem(STORAGE_KEYS.token, 'tok-expired');
+    seedIdentity('u1', 'Alice');
+    saveUserDaily('u1', CACHED_DAILY, 3);
+    const seeded = seedLocalData();
+    installFetchMock(() => apiErrorReply(401, 'UNAUTHORIZED', '登录已过期'));
+
+    const store = useSessionStore();
+    expect(store.isLoggedIn).toBe(true);
+
+    await expect(store.hydrate()).resolves.toBe(false);
+
+    expect(store.isLoggedIn).toBe(false);
+    expect(localStorage.getItem(STORAGE_KEYS.token)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.identity)).toBeNull();
+    expect(localStorage.getItem(userDailyKey('u1'))).toBeNull();
+    // 本地模式的数据一个字节都没动
+    expectLocalDataIntact(seeded);
+  });
+
+  it('logout() 清掉身份缓存与本账户今日缓存，但本地键原样', async () => {
+    localStorage.setItem(STORAGE_KEYS.token, 'tok-alice');
+    seedIdentity('u1', 'Alice');
+    saveUserDaily('u1', CACHED_DAILY, 3);
+    const seeded = seedLocalData();
+    installFetchMock(call =>
+      call.url.endsWith('/api/auth/me')
+        ? { body: { id: 'u1', name: 'Alice' } }
+        : { status: 204 },
+    );
+
+    const store = useSessionStore();
+    await store.hydrate();
+    await store.logout();
+
+    expect(localStorage.getItem(STORAGE_KEYS.identity)).toBeNull();
+    expect(localStorage.getItem(userDailyKey('u1'))).toBeNull();
+    expectLocalDataIntact(seeded);
   });
 });

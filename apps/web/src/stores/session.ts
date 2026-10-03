@@ -6,14 +6,15 @@
  * 两条架构规则在这里落地：
  *
  * 1. **登录模式绝不碰本地模式的存储键**（`huedle:daily` / `huedle:history` /
- *    `huedle:streak`）。本 store 只写 `huedle:token`，登录模式的结果一律走服务端
- *    （见 `composables/useDailyColor.ts` / `useHistory.ts`），因此登出后本地数据
- *    原封不动（DESIGN 11.3）。
- * 2. **启动时必须用 token 补回 userId**（`hydrate()`）。userId 只在内存里，
- *    刷新后 token 还在、userId 没了 → `isLoggedIn` 变 false，已登录用户会被
- *    静默打回本地模式。`hydrate()` 用 `GET /api/auth/me` 补回身份；
- *    401 表示 token 已过期或被撤销 → 清掉 token 回本地模式。
- *    **不存在用 localStorage 存 userId 的捷径**——那会绕过 token 校验。
+ *    `huedle:streak`）。本 store 只写 `huedle:token` 与登录模式专属的
+ *    `huedle:identity`，登录模式的结果写进 `huedle:daily:user:<userId>`（见
+ *    `composables/useDailyColor.ts`），因此登出后本地数据原封不动（DESIGN 11.3）。
+ * 2. **启动时必须用 token 向服务端核对身份**（`hydrate()`）。身份缓存
+ *    `huedle:identity` 只用来让首屏**立刻**按登录模式渲染（不再等网络落地），
+ *    它绝不参与授权判定：只要 token 在，`hydrate()` 就一定会调
+ *    `GET /api/auth/me`——除非本次会话已经由服务端确认过（`verified`）。
+ *    401 表示 token 已过期或被撤销 → 清 token、清身份缓存回本地模式。
+ *    **不存在「有身份缓存就跳过校验」的捷径**——那等于把缓存变成了授权依据。
  */
 import { defineStore, getActivePinia } from 'pinia';
 import { computed, ref } from 'vue';
@@ -26,7 +27,13 @@ import {
   type ApiUser,
 } from '../lib/api';
 import { getAnonymousId } from '../lib/identity';
-import { STORAGE_KEYS } from '../lib/storage';
+import {
+  STORAGE_KEYS,
+  clearIdentity,
+  clearUserDaily,
+  loadIdentity,
+  saveIdentity,
+} from '../lib/storage';
 
 function readToken(): string | null {
   try {
@@ -48,19 +55,29 @@ function writeToken(token: string | null): void {
 export const useSessionStore = defineStore('session', () => {
   const token = ref<string | null>(readToken());
   /**
-   * 登录身份。**只在内存里**，只能由 `hydrate()` / `login()` / `registerUser()`
-   * 写入——刻意不持久化，见文件头规则 2。
+   * 启动时读一次身份缓存：有 token 才认（没 token 就是本地模式，缓存是残留）。
+   * 它只让首屏立刻渲染成登录态，**不代表 token 已被验证**（见 `verified`）。
    */
-  const userId = ref<string | null>(null);
-  const userName = ref<string | null>(null);
+  const cachedIdentity = token.value === null ? null : loadIdentity();
   /**
-   * 是否已经完成一次启动身份恢复。
-   *
-   * 无 token 时初始即为 `true`（本地模式无需等待）；有 token 时保持 `false`
-   * 直到 `hydrate()` 落地，`App.vue` 据此延后渲染路由内容，避免子组件在
-   * 身份还没补回来时读成本地模式。
+   * 登录身份：优先来自身份缓存（仅显示），随后由 `hydrate()` 用服务端结果覆盖。
    */
-  const hydrated = ref(token.value === null);
+  const userId = ref<string | null>(cachedIdentity?.userId ?? null);
+  const userName = ref<string | null>(cachedIdentity?.userName ?? null);
+  /**
+   * 本次会话是否已由**服务端**确认过身份（`GET /api/auth/me` 成功）。
+   *
+   * 身份缓存命中时 `userId` 一开始就不是 null，但 `verified` 仍是 false——
+   * `hydrate()` 据此判断「还需要向服务端核对一次」，绝不用缓存跳过校验。
+   */
+  const verified = ref(false);
+  /**
+   * 身份是否已落定（本地模式无 token 时为 true；有身份缓存时也可立即为 true）。
+   *
+   * 首屏**不再**依赖它挡渲染（`App.vue` 直接用缓存身份渲染），保留它是为了
+   * 让「身份是否已确认」这件事对调用方可读。
+   */
+  const hydrated = ref(token.value === null || cachedIdentity !== null);
   /**
    * 全局一次性提示（如「登录状态已失效，已切换回本地模式」）。
    *
@@ -81,50 +98,63 @@ export const useSessionStore = defineStore('session', () => {
     notice.value = null;
   }
 
-  /** 写入登录态（登录 / 注册成功后调用）。 */
+  /** 写入登录态（登录 / 注册成功后调用），并把身份写进只用于显示的身份缓存。 */
   function setSession(nextToken: string, user: ApiUser): void {
     token.value = nextToken;
     userId.value = user.id;
     userName.value = user.name;
+    verified.value = true;
     hydrated.value = true;
     notice.value = null;
     writeToken(nextToken);
+    saveIdentity(user.id, user.name);
   }
 
   /**
-   * 本地清空登录态（**不打后端**）：401 回退、登出都走这里。本地数据一律不动。
+   * 本地清空登录态（**不打后端**）：401 回退、登出都走这里。本地模式的三个记录键
+   * 一律不动（DESIGN 11.3）。
+   *
+   * 清掉的只有**登录态缓存**：token、`huedle:identity`、以及本账户的
+   * `huedle:daily:user:<userId>`——token 都没了，留着账户身份的今日缓存没有意义，
+   * 也避免共享设备上留下上一个账户的数据。
    *
    * **不清 `notice`**：401 回退的提示需要跨过"按模式重建路由内容"活下来。
    * 登录成功（`setSession`）与主动登出（`logout`）会清掉它。
    */
   function clearSession(): void {
+    const previousUserId = userId.value;
     token.value = null;
     userId.value = null;
     userName.value = null;
+    verified.value = false;
     hydrated.value = true;
     writeToken(null);
+    clearIdentity();
+    if (previousUserId !== null) clearUserDaily(previousUserId);
   }
 
   /**
-   * 用已有 token 向服务端补回 userId / userName。
+   * 用已有 token 向服务端核对身份，并把服务端结果写回身份缓存。
    *
    * - 无 token → 本地模式，返回 `false`；
-   * - `me` 成功 → 登录模式，返回 `true`；
-   * - `me` 返回 401 → token 已失效，清掉并回本地模式，返回 `false`；
-   * - 网络错误 → **保留 token**（可能只是后端没起），本次回退本地模式，返回 `false`，
-   *   下次启动再试。
+   * - `me` 成功 → 登录模式，用服务端 `id` / `name` 覆盖缓存，返回 `true`；
+   * - `me` 返回 401 → token 已失效，清 token + 身份缓存回本地模式，返回 `false`；
+   * - 网络错误 → **保留 token 与身份缓存**（可能只是后端没起），本次按缓存身份显示，
+   *   返回 `false`，下次启动再核对。
    *
-   * 幂等：已成功恢复过的会话直接返回，不重复请求。
+   * 幂等：本次会话已由服务端确认过（`verified`）才直接返回，不重复请求。
+   * **身份缓存命中也必须请求**——否则缓存就成了授权依据。
    */
   async function hydrate(): Promise<boolean> {
     const current = token.value;
     if (current === null) {
       userId.value = null;
       userName.value = null;
+      verified.value = false;
       hydrated.value = true;
       return false;
     }
-    if (userId.value !== null) {
+    if (userId.value !== null && verified.value) {
       hydrated.value = true;
       return true;
     }
@@ -134,6 +164,8 @@ export const useSessionStore = defineStore('session', () => {
       if (token.value !== current) return isLoggedIn.value; // 期间被登出 / 换了账户
       userId.value = user.id;
       userName.value = user.name;
+      verified.value = true;
+      saveIdentity(user.id, user.name);
       hydrated.value = true;
       return true;
     } catch (error) {
@@ -141,7 +173,7 @@ export const useSessionStore = defineStore('session', () => {
         clearSession();
         return false;
       }
-      // 网络 / 服务端错误：保留 token 以便下次重试，本次按本地模式运行。
+      // 网络 / 服务端错误：保留 token（与身份缓存）以便下次重试，本次按缓存身份显示。
       hydrated.value = true;
       return false;
     }

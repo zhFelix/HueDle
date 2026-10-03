@@ -1,5 +1,22 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { STORAGE_KEYS, clearLocalData, clearLocalHistory, isRevealedToday, loadHistory, loadRevealedMarker, loadTodayResult, saveRevealedMarker, saveTodayResult } from './storage';
+import {
+  STORAGE_KEYS,
+  clearIdentity,
+  clearLocalData,
+  clearLocalHistory,
+  clearUserDaily,
+  isRevealedToday,
+  loadHistory,
+  loadIdentity,
+  loadRevealedMarker,
+  loadTodayResult,
+  loadUserDaily,
+  saveIdentity,
+  saveRevealedMarker,
+  saveTodayResult,
+  saveUserDaily,
+  userDailyKey,
+} from './storage';
 import type { HistoryItem } from './storage';
 
 const item: HistoryItem = {
@@ -145,7 +162,7 @@ describe('clearLocalData', () => {
     localStorage.clear();
   });
 
-  it('清空全部 6 个 key', () => {
+  it('清空 STORAGE_KEYS 里的全部 key', () => {
     localStorage.setItem(STORAGE_KEYS.anonymousId, 'a');
     localStorage.setItem(STORAGE_KEYS.token, 't');
     saveTodayResult(item);
@@ -211,5 +228,119 @@ describe('已揭晓标记（huedle:revealed）', () => {
     clearLocalHistory();
 
     expect(loadRevealedMarker()).toEqual({ userId: 'user-1', date: '2026-03-04' });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 登录模式的今日结果缓存：`huedle:daily:user:<userId>`
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('用户今日结果缓存（huedle:daily:user:<userId>）', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('key 是 huedle:daily:user:<userId>，与本地键 huedle:daily 不是同一个 key', () => {
+    expect(userDailyKey('u1')).toBe('huedle:daily:user:u1');
+    expect(userDailyKey('u1')).not.toBe(STORAGE_KEYS.daily);
+
+    saveUserDaily('u1', item, 3);
+
+    expect(localStorage.getItem('huedle:daily:user:u1')).not.toBeNull();
+    // 本地模式专属的三个键一个都没被写
+    expect(localStorage.getItem(STORAGE_KEYS.daily)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.history)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.streak)).toBeNull();
+  });
+
+  it('按 (userId, date) 命中；别的账户 / 别的日期不命中', () => {
+    saveUserDaily('u1', item, 3);
+
+    expect(loadUserDaily('u1', '2026-03-04')).toEqual({ ...item, streak: 3 });
+    expect(loadUserDaily('u2', '2026-03-04')).toBeNull();
+    expect(loadUserDaily('u1', '2026-03-05')).toBeNull();
+  });
+
+  it('缺 streak 字段 → 回落 0，其余字段照常可用', () => {
+    localStorage.setItem(userDailyKey('u1'), JSON.stringify({ v: 1, ...item }));
+
+    expect(loadUserDaily('u1', '2026-03-04')).toEqual({ ...item, streak: 0 });
+  });
+
+  it.each([
+    ['非 JSON', 'not-json'],
+    ['数组', '[]'],
+    ['结构不合法的记录', '{"date":"2026-03-04"}'],
+    ['版本不符', '{"v":99,"date":"2026-03-04","hex":"#002FA7","cp":1,"rarity":"rare","badgeIds":[]}'],
+  ])('脏数据（%s）→ null，绝不抛', (_label, raw) => {
+    localStorage.setItem(userDailyKey('u1'), raw);
+
+    expect(() => loadUserDaily('u1', '2026-03-04')).not.toThrow();
+    expect(loadUserDaily('u1', '2026-03-04')).toBeNull();
+  });
+
+  it('clearUserDaily 只删指定账户的缓存', () => {
+    saveUserDaily('u1', item, 1);
+    saveUserDaily('u2', item, 2);
+
+    clearUserDaily('u1');
+
+    expect(loadUserDaily('u1', '2026-03-04')).toBeNull();
+    expect(loadUserDaily('u2', '2026-03-04')?.streak).toBe(2);
+  });
+
+  it('clearLocalData 会清掉所有账户的今日缓存（前缀扫描）', () => {
+    saveUserDaily('u1', item, 1);
+    saveUserDaily('u2', item, 2);
+
+    clearLocalData();
+
+    expect(loadUserDaily('u1', '2026-03-04')).toBeNull();
+    expect(loadUserDaily('u2', '2026-03-04')).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 登录模式的身份缓存 `huedle:identity`（只用于显示）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('身份缓存（huedle:identity）', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('写入后读回 { userId, userName }', () => {
+    saveIdentity('u1', 'Alice');
+
+    expect(loadIdentity()).toEqual({ userId: 'u1', userName: 'Alice' });
+  });
+
+  it('空 userId 被拒绝写入', () => {
+    saveIdentity('', 'Alice');
+
+    expect(loadIdentity()).toBeNull();
+  });
+
+  it.each([
+    ['非 JSON', 'not-json'],
+    ['数组', '[]'],
+    ['缺 userName', '{"userId":"u1"}'],
+    ['userId 为空串', '{"userId":"","userName":"Alice"}'],
+    ['userName 不是字符串', '{"userId":"u1","userName":1}'],
+  ])('脏数据（%s）→ null，绝不抛', (_label, raw) => {
+    localStorage.setItem(STORAGE_KEYS.identity, raw);
+
+    expect(() => loadIdentity()).not.toThrow();
+    expect(loadIdentity()).toBeNull();
+  });
+
+  it('clearIdentity 只删身份缓存', () => {
+    saveIdentity('u1', 'Alice');
+    saveUserDaily('u1', item, 1);
+
+    clearIdentity();
+
+    expect(loadIdentity()).toBeNull();
+    expect(loadUserDaily('u1', '2026-03-04')).not.toBeNull();
   });
 });

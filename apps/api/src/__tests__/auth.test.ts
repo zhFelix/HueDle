@@ -3,7 +3,7 @@
  *
  * 数据库改为 Postgres 后，`Store` 全部是异步的：夹具与每个断言都补了 `await`。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { hashToken } from '../lib/tokens';
 import { authHeaders, makeHarness, postJson, registerUser, TEST_PASSWORD } from './helpers';
 import { registerTestDatabase } from './testDb';
@@ -150,5 +150,65 @@ describe('会话过期', () => {
     await store.setSessionExpiry(hashToken(token), new Date(Date.now() - 1000).toISOString());
 
     expect((await app.request('/api/auth/me', { headers: authHeaders(token) })).status).toBe(401);
+  });
+});
+
+/**
+ * findSession + findUserById 合并成一条 JOIN 后，认证语义必须一条都不变。
+ *
+ * JOIN 查不到 = 会话不存在 **或** 用户已被删除（sessions 外键 ON DELETE CASCADE 会把
+ * 会话一起删掉，所以不存在「有会话没用户」的孤儿行）；因此这两类都归入同一个 401 分支。
+ */
+describe('认证：JOIN 合并后语义不变', () => {
+  it('缺 Authorization 头 → 401', async () => {
+    const { app } = await makeHarness();
+    expect((await app.request('/api/auth/me')).status).toBe(401);
+  });
+
+  it('无效 token → 401，且不会误删/误建任何会话', async () => {
+    const { app, store } = await makeHarness();
+    const { token } = await registerUser(app, 'alice');
+
+    const res = await app.request('/api/auth/me', { headers: authHeaders('deadbeef'.repeat(8)) });
+    expect(res.status).toBe(401);
+    // 合法的那条会话不受影响
+    expect(await store.findSession(hashToken(token))).toBeDefined();
+  });
+
+  it('已过期 session → 401，且该 session 被删除', async () => {
+    const { app, store } = await makeHarness();
+    const { token } = await registerUser(app, 'alice');
+    await store.setSessionExpiry(hashToken(token), new Date(Date.now() - 1000).toISOString());
+
+    expect((await app.request('/api/auth/me', { headers: authHeaders(token) })).status).toBe(401);
+    // 过期分支仍会顺手清掉废会话
+    expect(await store.findSession(hashToken(token))).toBeUndefined();
+  });
+
+  it('用户被删除（session 随之级联消失）→ 401，且 session 已不存在', async () => {
+    const { app, store, pool } = await makeHarness();
+    const { token, user } = await registerUser(app, 'alice');
+    expect(await store.findSession(hashToken(token))).toBeDefined();
+
+    await pool.query('DELETE FROM users WHERE id = $1', [user.id]);
+
+    expect((await app.request('/api/auth/me', { headers: authHeaders(token) })).status).toBe(401);
+    expect(await store.findSession(hashToken(token))).toBeUndefined();
+  });
+
+  it('认证只打 1 次数据库查询，且用的是 sessions JOIN users', async () => {
+    const { app, pool } = await makeHarness();
+    const { token } = await registerUser(app, 'alice');
+
+    const spy = vi.spyOn(pool, 'query');
+    try {
+      const res = await app.request('/api/auth/me', { headers: authHeaders(token) });
+      expect(res.status).toBe(200);
+      // 合并前是 2 次（findSession + findUserById）
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(String(spy.mock.calls[0]?.[0])).toMatch(/JOIN\s+users/i);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

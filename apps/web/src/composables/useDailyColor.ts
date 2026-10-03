@@ -28,12 +28,14 @@
  *
  * | | 本地模式 | 登录模式 |
  * |---|---|---|
- * | 结果来源 | 纯函数 + `huedle:daily` 冻结存档 | `GET /api/daily`（服务端权威） |
+ * | 结果来源 | 纯函数 + `huedle:daily` 冻结存档 | `huedle:daily:user:<userId>` 缓存，未命中才 `GET /api/daily` |
+ * | 连续天数 | `computeStreak(loadHistory(), day)` | `/api/daily` 响应的 `streak` 字段（不再调 `/api/history`） |
  * | 已揭晓标记 | `huedle:daily` 是否存在 | `huedle:revealed` 的 `{ userId, date }` |
  * | `reveal()` 写什么 | `saveTodayResult()`（daily + history + streak） | **只写** `huedle:revealed` |
  *
  * **登录模式一次都不写 `huedle:daily` / `huedle:history` / `huedle:streak`**
- * ——它们是本地模式专属，这样登出后本地历史与今日结果才能原封不动恢复（11.3）。
+ * ——它们是本地模式专属（登录模式的缓存用的是 `huedle:daily:user:<userId>` 这个
+ * 完全不同的 key），这样登出后本地历史与今日结果才能原封不动恢复（11.3）。
  *
  * 401 → 清 session、回退本地模式、重新 load，并给一条 `notice`；
  * 其它失败（含后端没起）→ 可重试的 `error` 态，绝不白屏。
@@ -48,16 +50,19 @@ import {
   type ColorInfo,
   type ScoreResult,
 } from '@huedle/shared';
-import { getDaily, getHistory, isApiError } from '../lib/api';
+import { getDaily, isApiError } from '../lib/api';
 import { getLocalIdentity } from '../lib/identity';
 import {
+  clearUserDaily,
   computeStreak,
   isHistoryItem,
   isRevealedToday,
   loadHistory,
   loadTodayResult,
+  loadUserDaily,
   saveRevealedMarker,
   saveTodayResult,
+  saveUserDaily,
   type HistoryItem,
 } from '../lib/storage';
 import { clearSessionOnUnauthorized, currentNotice, currentSession } from '../stores/session';
@@ -172,18 +177,64 @@ export function useDailyColor(options: UseDailyColorOptions = {}): UseDailyColor
     streak.value = computeStreak(loadHistory(), day);
   }
 
-  /** 连续天数：登录模式复用服务端历史与同一份 `computeStreak`，失败不致命。 */
-  async function loadServerStreak(token: string, day: string): Promise<number> {
-    try {
-      return computeStreak(await getHistory(token), day);
-    } catch {
-      return 0;
-    }
+  /**
+   * 把一条今日结果（服务端响应或缓存）落到内存状态。
+   *
+   * 颜色 / 分数一律按存档还原，不重算；`streak` 直接采用随结果下发的值。
+   * `historyItem` 只保留 `HistoryItem` 的 5 个字段（`streak` 不属于它）。
+   */
+  function applyResult(
+    item: HistoryItem,
+    itemColor: ColorInfo,
+    streakValue: number,
+    userId: string,
+    day: string,
+  ): void {
+    color.value = itemColor;
+    result.value = restoreScore(item.badgeIds, item.cp, item.rarity);
+    historyItem.value = {
+      date: item.date,
+      hex: item.hex.toUpperCase(),
+      cp: item.cp,
+      rarity: item.rarity,
+      badgeIds: [...item.badgeIds],
+    };
+    // 登录模式的"已揭示"由 huedle:revealed 决定，与 huedle:daily 无关。
+    revealed.value = isRevealedToday(userId, day);
+    streak.value = streakValue;
   }
 
-  /** 登录模式分支：服务端是权威，客户端只做还原与展示。 */
+  /** 从 `/api/daily` 响应里读连续天数；缺失 / 脏值一律按 0，不让页面崩。 */
+  function readStreak(value: { streak?: unknown }): number {
+    const raw = value.streak;
+    return typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 ? raw : 0;
+  }
+
+  /**
+   * 登录模式分支。
+   *
+   * A：**先读 `huedle:daily:user:<userId>` 缓存**，命中即渲染（0 请求）；
+   *    未命中才 `GET /api/daily`，拿到后连同 `streak` 写回缓存。有效期由响应的
+   *    `date` 字段判定（跨天自然失效），不用时间戳 TTL——服务端的今日结果当天冻结，
+   *    所以「同一天」就是正确的有效期。
+   * C：`streak` 直接取自 `/api/daily` 响应，不再额外调一次 `/api/history`。
+   *
+   * 缓存只影响「少发一次数据请求」，**不影响授权**：token 是否有效仍由
+   * `hydrate()` 的 `GET /api/auth/me` 每次核对；这里的 401 也照旧回退本地模式。
+   */
   async function loadFromServer(token: string, userId: string, day: string): Promise<void> {
-    let item: HistoryItem;
+    const cached = loadUserDaily(userId, day);
+    if (cached) {
+      const cachedColor = colorInfoFromHex(cached.hex);
+      if (cachedColor) {
+        applyResult(cached, cachedColor, cached.streak, userId, day);
+        return;
+      }
+      // 缓存颜色解析不出来（脏数据 / 旧版本）：删掉它，改走服务端。
+      clearUserDaily(userId);
+    }
+
+    let item: { streak?: unknown };
     try {
       item = await getDaily(token);
     } catch (err) {
@@ -204,18 +255,15 @@ export function useDailyColor(options: UseDailyColorOptions = {}): UseDailyColor
       return;
     }
 
-    const archivedColor = colorInfoFromHex(item.hex);
-    if (!archivedColor) {
+    const itemColor = colorInfoFromHex(item.hex);
+    if (!itemColor) {
       error.value = '服务器返回的颜色无法解析。';
       return;
     }
 
-    color.value = archivedColor;
-    result.value = restoreScore(item.badgeIds, item.cp, item.rarity);
-    historyItem.value = { ...item, hex: item.hex.toUpperCase() };
-    // 登录模式的"已揭示"由 huedle:revealed 决定，与 huedle:daily 无关。
-    revealed.value = isRevealedToday(userId, day);
-    streak.value = await loadServerStreak(token, day);
+    const streakValue = readStreak(item);
+    applyResult(item, itemColor, streakValue, userId, day);
+    saveUserDaily(userId, item, streakValue);
   }
 
   async function load(): Promise<void> {

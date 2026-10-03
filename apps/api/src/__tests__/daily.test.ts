@@ -8,9 +8,10 @@
  *     （SQLite → Postgres 迁移最容易出问题的地方）。
  */
 import { calculateScore, getDailyColor, getDailyColorInfo, utcDate } from '@huedle/shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createApp } from '../app';
 import { Store } from '../db';
+import { computeStreak } from '../lib/streak';
 import { authHeaders, makeHarness, registerUser, TEST_RATE_LIMIT } from './helpers';
 import { getTestPool, registerTestDatabase } from './testDb';
 
@@ -63,7 +64,7 @@ describe('GET /api/daily', () => {
     expect(rows.rows[0].n).toBe(1);
   });
 
-  it('响应形状与前端 HistoryItem 一致，且内容等于 shared 的独立重算', async () => {
+  it('响应形状与前端 HistoryItem 一致（+ streak），且内容等于 shared 的独立重算', async () => {
     const { app } = await makeHarness({ now: () => DAY });
     const { token, user } = await registerUser(app, 'alice');
 
@@ -74,19 +75,23 @@ describe('GET /api/daily', () => {
       cp: number;
       rarity: string;
       badgeIds: string[];
+      streak: number;
     };
 
     // —— 独立重算：种子 = 服务端分配的 userId ——
     const expectedColor = getDailyColorInfo({ mode: 'user', userId: user.id }, DAY);
     const expectedScore = calculateScore(expectedColor);
 
-    expect(Object.keys(body).sort()).toEqual(['badgeIds', 'cp', 'date', 'hex', 'rarity']);
+    // 原有 5 个字段形状不变，只是多了一个 streak。
+    expect(Object.keys(body).sort()).toEqual(['badgeIds', 'cp', 'date', 'hex', 'rarity', 'streak']);
     expect(body).toEqual({
       date: DAY_STR,
       hex: expectedColor.hex,
       cp: expectedScore.cp,
       rarity: expectedScore.rarity,
       badgeIds: expectedScore.badges.map(b => b.id),
+      // 新用户当天刚生成记录 → 前端口径 computeStreak 为 1
+      streak: 1,
     });
     // 也与最底层的 RGB 生成器对齐（防止 hex 转换处出岔）
     expect(body.hex).toBe(
@@ -157,6 +162,99 @@ describe('GET /api/daily', () => {
   });
 });
 
+/**
+ * `streak` 口径必须与前端 `apps/web/src/lib/storage.ts` 的 `computeStreak` **完全一致**，
+ * 因此期望值直接沿用前端 `streak.test.ts` 里那几条（连续 3 天 → 3、断档 → 2、今天不在 → 0）。
+ */
+describe('GET /api/daily 的 streak（与前端 computeStreak 同口径）', () => {
+  /** 以权威写入路径预置某一天的存档；streak 只关心 `date`，其余字段给合法值即可。 */
+  async function seedDay(store: Store, userId: string, date: string): Promise<void> {
+    await store.insertDailyIfAbsent({
+      userId,
+      date,
+      hex: '#000000',
+      cp: 1,
+      rarity: 'trash',
+      badgeIdsJson: '[]',
+      createdAt: `${date}T00:00:00.000Z`,
+    });
+  }
+
+  it('今天有记录 → 1；同一天再调用仍是 1，且响应逐字节一致', async () => {
+    const { app } = await makeHarness({ now: () => DAY });
+    const { token } = await registerUser(app, 'alice');
+
+    const first = await app.request('/api/daily', { headers: authHeaders(token) });
+    const firstText = await first.text();
+    const second = await app.request('/api/daily', { headers: authHeaders(token) });
+    const secondText = await second.text();
+
+    expect((JSON.parse(firstText) as { streak: number }).streak).toBe(1);
+    expect((JSON.parse(secondText) as { streak: number }).streak).toBe(1);
+    expect(secondText).toBe(firstText);
+  });
+
+  it('连续 3 天（含今天）→ 3', async () => {
+    const { app, store } = await makeHarness({ now: () => DAY });
+    const { token, user } = await registerUser(app, 'alice');
+    await seedDay(store, user.id, '2026-03-03');
+    await seedDay(store, user.id, '2026-03-02');
+
+    const body = (await (await app.request('/api/daily', { headers: authHeaders(token) })).json()) as {
+      streak: number;
+    };
+    expect(body.streak).toBe(3);
+  });
+
+  it('中间断档：只数到今天往回的第一个连续段 → 2', async () => {
+    const { app, store } = await makeHarness({ now: () => DAY });
+    const { token, user } = await registerUser(app, 'alice');
+    // 有 03-03 与 03-01，缺 03-02 → 03-02 处断链
+    await seedDay(store, user.id, '2026-03-03');
+    await seedDay(store, user.id, '2026-03-01');
+
+    const body = (await (await app.request('/api/daily', { headers: authHeaders(token) })).json()) as {
+      streak: number;
+    };
+    expect(body.streak).toBe(2);
+  });
+
+  it('今天没记录 → 0（端点总会补上今天，故在纯函数层对齐前端定义）', () => {
+    expect(computeStreak(new Set(['2026-03-02', '2026-03-03']), '2026-03-04')).toBe(0);
+  });
+
+  it('只看自己的记录：别人的连续天数不算进来', async () => {
+    const { app, store } = await makeHarness({ now: () => DAY });
+    const alice = await registerUser(app, 'alice');
+    const bob = await registerUser(app, 'bob');
+    await seedDay(store, bob.user.id, '2026-03-03');
+    await seedDay(store, bob.user.id, '2026-03-02');
+
+    const body = (await (await app.request('/api/daily', { headers: authHeaders(alice.token) })).json()) as {
+      streak: number;
+    };
+    expect(body.streak).toBe(1); // alice 只有今天
+  });
+
+  it('往返成本：当天已有记录时整条请求只打 2 次库（认证 JOIN + listDaily），streak 不再额外查', async () => {
+    const { app, pool } = await makeHarness({ now: () => DAY });
+    const { token } = await registerUser(app, 'alice');
+    // 先暖一次，让今天的记录落库
+    await app.request('/api/daily', { headers: authHeaders(token) });
+
+    const spy = vi.spyOn(pool, 'query');
+    try {
+      const res = await app.request('/api/daily', { headers: authHeaders(token) });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { streak: number }).streak).toBe(1);
+      // 认证 1 次（JOIN）+ listDaily 1 次；若 streak 又单独发了查询，这里会是 3。
+      expect(spy).toHaveBeenCalledTimes(2);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe('GET /api/history', () => {
   it('需要认证', async () => {
     const { app } = await makeHarness();
@@ -207,5 +305,17 @@ describe('GET /api/history', () => {
 
     const bobHistory = await app.request('/api/history', { headers: authHeaders(bob.token) });
     expect(await bobHistory.json()).toEqual([]);
+  });
+
+  it('响应形状不变：每条仍是 5 个字段，**没有** streak（streak 只加在 /api/daily）', async () => {
+    const { app } = await makeHarness({ now: () => DAY });
+    const { token } = await registerUser(app, 'alice');
+    await app.request('/api/daily', { headers: authHeaders(token) });
+
+    const items = (await (await app.request('/api/history', { headers: authHeaders(token) })).json()) as Array<
+      Record<string, unknown>
+    >;
+    expect(items).toHaveLength(1);
+    expect(Object.keys(items[0]!).sort()).toEqual(['badgeIds', 'cp', 'date', 'hex', 'rarity']);
   });
 });

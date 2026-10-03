@@ -219,13 +219,23 @@ export async function me(token: string): Promise<ApiUser> {
   return requireUser(await request<unknown>('/api/auth/me', { token }));
 }
 
-/** `GET /api/daily` → 今日 `HistoryItem`（已抽过则原样返回）。 */
-export async function getDaily(token: string): Promise<HistoryItem> {
+/**
+ * `GET /api/daily` 的响应：今日结果 + 服务端算好的连续天数。
+ *
+ * `streak` 是冻结契约里的新字段（`{ date, hex, cp, rarity, badgeIds, streak }`），
+ * 有了它客户端就不必再额外调一次 `/api/history` 去数连续天数。
+ */
+export interface DailyResult extends HistoryItem {
+  streak: number;
+}
+
+/** `GET /api/daily` → 今日 `DailyResult`（已抽过则原样返回）。 */
+export async function getDaily(token: string): Promise<DailyResult> {
   const body = await request<unknown>('/api/daily', { token });
   if (!isRecord(body)) {
     throw new ApiError(200, 'INVALID_RESPONSE', '服务器返回的今日结果格式不正确。');
   }
-  return body as unknown as HistoryItem;
+  return body as unknown as DailyResult;
 }
 
 /** `GET /api/history` → `HistoryItem[]`（服务端已按日期降序）。 */
