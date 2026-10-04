@@ -93,7 +93,7 @@ function toggle(date: string): void {
 
       <div v-if="row.expanded" class="border-t border-ink-700 p-4">
         <p class="mb-4 font-mono text-xs text-neutral-500">
-          {{ row.item.hex }} · {{ row.item.date }} UTC
+          {{ row.item.hex }} · {{ row.item.date }}
         </p>
         <BadgeList :badges="row.score?.scoringBadges ?? []" :superseded="row.score?.supersededBadges" />
       </div>
