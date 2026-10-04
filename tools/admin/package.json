@@ -3,10 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "HueDle 本地管理工具（只读统计 CLI + 只监听 127.0.0.1 的本机 UI；不进生产镜像）",
+  "description": "HueDle 本地管理工具（只读统计 + 加徽章流水线；只监听 127.0.0.1，不进生产镜像）",
   "scripts": {
     "stats": "tsx src/cli.ts stats",
     "ui": "tsx src/cli.ts ui",
+    "add-badge": "tsx src/cli.ts add-badge",
+    "rollback": "tsx src/cli.ts rollback",
     "test": "vitest run",
     "test:db": "vitest run --config vitest.db.config.ts",
     "typecheck": "tsc --noEmit"

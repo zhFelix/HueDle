@@ -14,6 +14,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseAdminArgs, USAGE, UsageError, type UiCommand } from './argv';
+import { runAddBadgeCommand, runRollbackCommand } from './addbadge/commands';
+import { shellExec } from './addbadge/pipeline';
 import { createCachedReportLoader } from './cache';
 import { createReadOnlyPool, redactSecrets, requireDatabaseUrl } from './db';
 import { renderHtml } from './render/html';
@@ -30,6 +32,9 @@ import { EXIT_DEPLOYMENT_REFUSED, findDeploymentReason, type EnvLike } from './u
 
 /** `tools/admin/` 根目录：相对路径（`out/...`）以它为基准，而不是调用者的 cwd。 */
 export const ADMIN_ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+/** 仓库根（`tools/admin/src/` 往上三级）。加徽章流水线改的是仓库里的源码。 */
+export const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 
 /** 相对路径按 `tools/admin` 解析；绝对路径原样使用。 */
 export function resolveFromAdminRoot(path: string): string {
@@ -70,6 +75,9 @@ async function runUi(args: UiCommand, env: EnvLike): Promise<number> {
           { days, includeNames: args.includeNames, topN: UI_ANALYZE_TOP_N },
           { refresh: options?.refresh === true },
         ),
+      // 加徽章页：HTTP 层只提交（抢锁 + 拉起 detached 子进程）与读状态文件，
+      // **绝不在请求处理器里跑管道**。
+      badge: { adminRoot: ADMIN_ROOT, root: REPO_ROOT },
     });
 
     // ① 地址写死在 listenUiServer 里（127.0.0.1），端口可传 0 让内核分配。
@@ -88,7 +96,10 @@ async function runUi(args: UiCommand, env: EnvLike): Promise<number> {
     console.log(
       `  用户明细：${args.includeNames ? '显示（仅页面，绝不写文件）' : '不显示（默认，需 --include-names）'}`,
     );
-    console.log(`  只监听 ${UI_HOST}；只有 GET/HEAD 路由，无登录、无 CORS、无写端点。Ctrl+C 结束。`);
+    console.log(
+      `  只监听 ${UI_HOST}；只读统计只有 GET/HEAD，唯一的写入口是 POST /badge/submit`
+      + '（只抢锁 + 拉起 detached 子进程，绝不在请求里跑管道）。无登录、无 CORS。Ctrl+C 结束。',
+    );
 
     const stop = (): void => {
       server.close();
@@ -125,6 +136,24 @@ export async function main(argv: string[] = process.argv.slice(2), deps: MainDep
   }
 
   if (args.command === 'ui') return runUi(args, deps.env ?? process.env);
+
+  // 加徽章：CLI 也只做「提交」，真正的管道在 detached 子进程里（见 addbadge/submit.ts）。
+  if (args.command === 'add-badge') {
+    return runAddBadgeCommand(args, {
+      adminRoot: ADMIN_ROOT,
+      root: REPO_ROOT,
+      error: message => console.error(message),
+    });
+  }
+  if (args.command === 'rollback') {
+    const exec = shellExec(REPO_ROOT);
+    return runRollbackCommand(args, {
+      adminRoot: ADMIN_ROOT,
+      root: REPO_ROOT,
+      error: message => console.error(message),
+      runTest: () => exec('pnpm -C packages/shared test', { timeoutMs: 15 * 60 * 1000 }).code,
+    });
+  }
 
   try {
     const report = await runStatsFromEnv({

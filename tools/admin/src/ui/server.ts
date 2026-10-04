@@ -14,9 +14,15 @@
  * `?refresh=1`（只表示"绕过本机内存缓存重查"，仍然是 GET、仍然只读）。
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { join } from 'node:path';
 import { redactSecrets } from '../db';
 import type { StatsReport } from '../report';
 import { MAX_WINDOW_DAYS, MIN_WINDOW_DAYS } from '../window';
+import { SpecError, parseBadgeSpec, type BadgeSpec } from '../addbadge/spec';
+import { makeRunId, submitBadgeJob, type SubmitResult } from '../addbadge/submit';
+import { addBadgePaths, readStatus, type StatusView } from '../addbadge/state';
+import { renderBadgePage, renderBadgeStatusJson } from './badge';
 import { renderUiError, renderUiPage } from './render';
 
 /**
@@ -55,7 +61,38 @@ export interface UiServerOptions {
    * 这只是"不省这一次"，取数通道与只读语义完全不变；实现方不支持时可忽略。
    */
   loadReport: (days: number, options?: { refresh?: boolean }) => Promise<StatsReport>;
+  /**
+   * 加徽章页（`/badge`、`/badge/status.json`、`POST /badge/submit`）。
+   *
+   * **不传就完全没有这三条路由**（默认 404 / 405）——只读统计路径因此不受影响，
+   * 这也是现有 `ui.server.test.ts` 能原样通过的原因。
+   */
+  badge?: UiBadgeOptions;
 }
+
+/** 加徽章页的可注入依赖：HTTP 层**只提交、不执行**管道。 */
+export interface UiBadgeOptions {
+  /** `tools/admin` 根（状态文件/锁都在这下面）。 */
+  adminRoot: string;
+  /** 仓库根（提交时做写盘前的静态校验）。 */
+  root: string;
+  /** 提交实现；默认 {@link submitBadgeJob}（真正的 detached 子进程）。 */
+  submit?: (spec: BadgeSpec, options: { force: boolean }) => SubmitResult;
+  /** 状态读取；默认 {@link readStatus}。 */
+  readStatus?: (adminRoot: string) => StatusView;
+  /**
+   * 表单令牌；不传就每次启动随机生成。
+   *
+   * **为什么需要它**：真 Chrome 实测会把同源表单 POST 的 `Origin` 发成字面量 `null`
+   * （不管响应头里的 Referrer-Policy 是什么），所以只靠 Origin 判断会把合法提交拒掉；
+   * 而直接放行 `Origin: null` 又等于放弃这道防线。令牌是标准解法：
+   * 跨站页面拿不到它（读不到我们的页面），因此带不带 Origin 都拦得住。
+   */
+  token?: string;
+}
+
+/** POST 体上限：表单只有几个短字段，超过就是异常请求。 */
+export const MAX_FORM_BODY_BYTES = 64 * 1024;
 
 /** `?days=` 的解析结果。 */
 export type DaysParse = { ok: true; days: number } | { ok: false; error: string };
@@ -78,35 +115,231 @@ export function parseDaysParam(raw: string | null, fallback: number): DaysParse 
   return { ok: true, days };
 }
 
-/** 统一响应出口：显式**不发** `Access-Control-Allow-Origin`（同源即可）。 */
+/**
+ * 统一响应出口：显式**不发** `Access-Control-Allow-Origin`（同源即可）。
+ *
+ * `referrerPolicy` 默认 `no-referrer`（页面自包含、无外链，别再往外带任何东西）。
+ * **但加徽章页必须用 `same-origin`**：按 Fetch 规范，`Referrer-Policy: no-referrer`
+ * 会让浏览器把表单 POST 的 `Origin` 序列化成字面量 `null`，于是同源提交会被
+ * CSRF 守卫拒掉——实测（真 Chrome）踩到过。只读统计页不变，仍然 `no-referrer`。
+ */
 function send(
   res: ServerResponse,
   status: number,
   body: string,
   extraHeaders: Record<string, string>,
   headOnly: boolean,
+  referrerPolicy = 'no-referrer',
 ): void {
   res.writeHead(status, {
     'Content-Type': 'text/html; charset=utf-8',
     'Content-Length': Buffer.byteLength(body),
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
-    // 页面自包含、无外链；这个头是"别再往外部带任何东西"的兜底。
-    'Referrer-Policy': 'no-referrer',
+    'Referrer-Policy': referrerPolicy,
     ...extraHeaders,
   });
   res.end(headOnly ? undefined : body);
 }
 
+/**
+ * 同源检查（**只有 POST 需要**）。
+ *
+ * 加徽章页是本地零认证的写入口，浏览器允许跨站表单 POST 到 `127.0.0.1`。
+ * 因此提交要求：`Host` 必须是 127.0.0.1（挡 DNS rebinding），
+ * 且 `Origin`（浏览器对跨源 POST 一定会带）必须就是本机。
+ * 这不是认证，是把「任何网页都能让本机跑一次改源码的流水线」这个洞堵掉。
+ */
+export function isSameOrigin(req: IncomingMessage): boolean {
+  const host = req.headers.host ?? '';
+  const hostname = host.startsWith('[') ? '' : (host.split(':')[0] ?? '');
+  if (hostname !== UI_HOST) return false;
+  const origin = req.headers.origin;
+  // 没有 Origin（curl 这类非浏览器客户端）或字面量 `null`（真 Chrome 的同源表单 POST
+  // 就会这样）都**不构成拒绝理由**——它们由表单令牌兜底（见 UiBadgeOptions.token）。
+  if (origin === undefined || origin === 'null') return true;
+  try {
+    const parsed = new URL(origin);
+    return parsed.protocol === 'http:' && parsed.hostname === UI_HOST;
+  } catch {
+    return false;
+  }
+}
+
+/** 表单令牌比对（定长、恒定时间；长度不同直接判否，不做提前返回的泄露）。 */
+export function tokenMatches(expected: string, provided: string | null): boolean {
+  if (!provided) return false;
+  const a = Buffer.from(expected);
+  const b = Buffer.from(provided);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+/** 读取 urlencoded 表单体（带上限，绝不无限缓冲）。 */
+export function readFormBody(req: IncomingMessage, limit = MAX_FORM_BODY_BYTES): Promise<string | null> {
+  return new Promise(resolve => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > limit) {
+        resolve(null);
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', () => resolve(null));
+  });
+}
+
+/** 从表单字段组装 spec（与 CLI 的 `--spec` 走同一个 `parseBadgeSpec`）。 */
+export function specFromForm(fields: URLSearchParams): { raw: unknown; spec: BadgeSpec } {
+  const mode = fields.get('mode') === 'handwritten' ? 'handwritten' : 'when';
+  const base = {
+    id: fields.get('id') ?? '',
+    name: fields.get('name') ?? '',
+    description: fields.get('description') ?? '',
+    family: fields.get('family') ?? '',
+    group: (fields.get('group') ?? '').trim() || null,
+  };
+  if (mode === 'handwritten') {
+    const check = (fields.get('check') ?? '').trim();
+    const evalRaw = (fields.get('evalHelpers') ?? '').trim();
+    let evalHelpers: unknown;
+    if (evalRaw) {
+      try {
+        evalHelpers = JSON.parse(evalRaw);
+      } catch (err) {
+        throw new SpecError(`evalHelpers 不是合法 JSON：${err instanceof Error ? err.message : err}`, 'handwritten.evalHelpers');
+      }
+    }
+    const raw = { ...base, handwritten: { check, ...(evalHelpers ? { evalHelpers } : {}) } };
+    return { raw, spec: parseBadgeSpec(raw) };
+  }
+  const whenRaw = (fields.get('when') ?? '').trim();
+  if (!whenRaw) throw new SpecError('结构化路径必须填 when（JSON 表达式）', 'when');
+  let when: unknown;
+  try {
+    when = JSON.parse(whenRaw);
+  } catch (err) {
+    throw new SpecError(`when 不是合法 JSON：${err instanceof Error ? err.message : err}`, 'when');
+  }
+  const raw = { ...base, when };
+  return { raw, spec: parseBadgeSpec(raw) };
+}
+
+/** `POST /badge/submit`：校验 → 提交（抢锁 + 拉起 detached 子进程）→ 303 回表单页。 */
+async function handleBadgeSubmit(
+  badge: UiBadgeOptions,
+  token: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  if (!isSameOrigin(req)) {
+    // 把观察到的东西写进页面：被拒的人需要知道**为什么**（否则只会以为是坏了）。
+    const observed = `Host=${JSON.stringify(req.headers.host ?? '')} Origin=${JSON.stringify(req.headers.origin ?? '')}`;
+    send(
+      res,
+      403,
+      renderUiError(403, `拒绝跨源提交：Host 必须是 ${UI_HOST}，Origin（若带）必须也是本机。观察到 ${observed}`),
+      {},
+      false,
+    );
+    return;
+  }
+  const contentType = req.headers['content-type'] ?? '';
+  if (!contentType.startsWith('application/x-www-form-urlencoded')) {
+    send(res, 400, renderUiError(400, '只接受 application/x-www-form-urlencoded 表单。'), {}, false);
+    return;
+  }
+  const body = await readFormBody(req);
+  if (body === null) {
+    send(res, 413, renderUiError(413, '表单体过大。'), {}, false);
+    return;
+  }
+
+  const fields = new URLSearchParams(body);
+  // 令牌优先：跨站页面读不到本页，因此拿不到这个值。
+  if (!tokenMatches(token, fields.get('token'))) {
+    send(
+      res,
+      403,
+      renderUiError(403, '表单令牌缺失或错误：请从 /badge 页面提交（跨站页面拿不到本页的表单令牌）。'),
+      {},
+      false,
+    );
+    return;
+  }
+  const force = fields.get('force') === '1';
+  let built: { raw: unknown; spec: BadgeSpec };
+  try {
+    built = specFromForm(fields);
+  } catch (err) {
+    const message = err instanceof SpecError ? err.message : err instanceof Error ? err.message : String(err);
+    redirect(res, `/badge?error=${encodeURIComponent(message)}`);
+    return;
+  }
+
+  const submit =
+    badge.submit ??
+    ((input: BadgeSpec, options: { force: boolean }): SubmitResult => {
+      const runId = makeRunId(input, new Date());
+      return submitBadgeJob({
+        rawSpec: built.raw,
+        spec: input,
+        root: badge.root,
+        adminRoot: badge.adminRoot,
+        runId,
+        logPath: join(addBadgePaths(badge.adminRoot).logsDir, `${runId}.log`),
+        force: options.force,
+      });
+    });
+
+  let result: SubmitResult;
+  try {
+    result = submit(built.spec, { force });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    redirect(res, `/badge?error=${encodeURIComponent(`提交失败：${message}`)}`);
+    return;
+  }
+  if (!result.ok) {
+    redirect(res, `/badge?error=${encodeURIComponent(result.reason)}`);
+    return;
+  }
+  redirect(res, `/badge?submitted=${encodeURIComponent(result.runId)}`);
+}
+
+/** 303：POST 之后回到表单页（PRG，避免刷新重复提交）。 */
+function redirect(res: ServerResponse, location: string): void {
+  res.writeHead(303, {
+    Location: location,
+    'Content-Length': 0,
+    'Cache-Control': 'no-store',
+    'Referrer-Policy': 'same-origin',
+  });
+  res.end();
+}
+
 async function handleRequest(
   options: UiServerOptions,
+  token: string,
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
   const method = req.method ?? 'GET';
+  // base 仅用于解析请求行，不发出任何网络请求。
+  const url = new URL(req.url ?? '/', `http://${UI_HOST}`);
 
-  // ④ 路由根本不接受写方法：POST/PUT/PATCH/DELETE 一律 405，没有第二个分支。
+  // ④ 只读统计的路由根本不接受写方法；**唯一**的例外是加徽章提交，
+  //    而且它只做「抢锁 + 拉起 detached 子进程」，不在请求里跑管道。
   if (method !== 'GET' && method !== 'HEAD') {
+    if (method === 'POST' && url.pathname === '/badge/submit' && options.badge) {
+      await handleBadgeSubmit(options.badge, token, req, res);
+      return;
+    }
     send(
       res,
       405,
@@ -117,11 +350,37 @@ async function handleRequest(
     return;
   }
 
-  // base 仅用于解析请求行，不发出任何网络请求。
-  const url = new URL(req.url ?? '/', `http://${UI_HOST}`);
+  // 加徽章页与状态接口（不传 options.badge 时它们与前缀路径一样是 404）。
+  if (options.badge && url.pathname === '/badge/status.json') {
+    const view = (options.badge.readStatus ?? readStatus)(options.badge.adminRoot);
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Length': Buffer.byteLength(renderBadgeStatusJson(view)),
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.end(renderBadgeStatusJson(view));
+    return;
+  }
+  if (options.badge && url.pathname === '/badge') {
+    const view = (options.badge.readStatus ?? readStatus)(options.badge.adminRoot);
+    const error = url.searchParams.get('error');
+    const submitted = url.searchParams.get('submitted');
+    const message = error ? `提交被拒绝：${error}` : submitted ? `已提交：${submitted}。管道在子进程里跑。` : undefined;
+    send(
+      res,
+      200,
+      renderBadgePage({ view, message, messageIsError: Boolean(error), token }),
+      {},
+      method === 'HEAD',
+      // 见 send() 的说明：no-referrer 会让同源表单 POST 的 Origin 变成 `null`。
+      'same-origin',
+    );
+    return;
+  }
 
   if (url.pathname !== '/') {
-    send(res, 404, renderUiError(404, `没有这个路由：${url.pathname}（只有 /）`), {}, method === 'HEAD');
+    send(res, 404, renderUiError(404, `没有这个路由：${url.pathname}（只有 / 与 /badge）`), {}, method === 'HEAD');
     return;
   }
 
@@ -146,8 +405,10 @@ async function handleRequest(
 
 /** 创建（但**不**监听）UI 服务。监听由 {@link listenUiServer} 负责。 */
 export function createUiServer(options: UiServerOptions): Server {
+  // 令牌每个服务实例一份（内存里，不落盘、不做身份）。
+  const token = options.badge ? (options.badge.token ?? randomBytes(16).toString('hex')) : '';
   return createServer((req, res) => {
-    void handleRequest(options, req, res);
+    void handleRequest(options, token, req, res);
   });
 }
 

@@ -15,6 +15,7 @@
 |---|---|
 | v1 | 初版：形态裁决（CLI + 静态 HTML 报告，不做 Web 服务）、8 条只读统计指标、加徽章流水线与失败回滚分类、文件所有权与「能否只新建」结论、测试策略、安全边界、待拍板项 |
 | v2 | **补充实现了「只读统计」的本地 UI**（§1.1 的裁决在这一点上被修改，理由与边界见下方 §1.7）。**加徽章仍是 CLI**，v1 关于它的论证不受影响。另修正 §4.1 的 `addbadge/*` 标注为「计划中」，并去掉已不存在的 `render/markdown.ts` |
+| v3 | **加徽章实现为「CLI + UI 表单」，但管道跑在 detached 子进程里**（§1.7 末尾的补充）。§1.5 的三条约束仍然全部照做，另外补齐了 §1.7 说的「任务与回滚的持久化设计」：状态文件（轮询，不用 SSE/WebSocket）+ `O_EXCL` 锁 + 子进程自持的回滚。§4.1 的 `addbadge/*` 已全部落地 |
 
 ---
 
@@ -131,6 +132,19 @@
 
 **换句话说：v2 放开的是「看」，没有放开「写」。**这条界线不是偶然的，是有意的——
 如果哪天真要把加徽章搬上 Web，§1.5 那三条约束**不够**，必须先补上任务与回滚的持久化设计。
+
+### v3 补充：加徽章搬上 Web 的**前提**已经补齐
+
+v3 实现了「CLI + UI 表单」的加徽章，并且逐条补上了上面那句「必须先补上的东西」：
+
+| 风险 | v3 的做法 |
+|---|---|
+| 「刷新页面时任务是否还在」 | 管道**跑在 detached 子进程里**，与 HTTP 请求生命周期无关；浏览器/终端断开都照跑 |
+| 进度推送与断线重连 | **不用 SSE/WebSocket**：进度写 `out/addbadge/status.json`，UI 只轮询它（无连接状态） |
+| 任务持久化 | `status.json`（阶段/进度/结论）+ `jobs/<runId>.json`（冻结的 spec）+ `logs/<runId>.log` |
+| 并发提交 | `O_EXCL` 锁：已有管道在跑就**拒绝**，不排队、不并发；pid 消失的 stale 锁会被检出并报告，绝不静默 |
+| 回滚 | 由**子进程自己**完成（快照 + `git restore` + md5 校验 + 跑一遍 `packages/shared test`），不依赖任何客户端 |
+| 认证 | 仍然没有。写入口只有 `POST /badge/submit`，且额外要求「同源 Origin/Host + 页面内表单令牌」——跨站页面拿不到令牌 |
 
 
 ## 2. 只读统计的指标清单
@@ -459,7 +473,7 @@ toPredicate(spec): (c: ColorInfo) => boolean   // 编译成可执行的 JS 闭�
 | `tools/admin/src/db.ts` | `loadEnvFile` + 只读连接池 + SQL 入口校验 + 连接串脱敏 |
 | `tools/admin/src/stats.ts` | M1–M8 的指标定义（id / 标题 / SQL / 说明），**纯数据** |
 | `tools/admin/src/render/{markdown,html}.ts` | 纯函数渲染（表格 → 文本 / 自包含 HTML） |
-| **（计划中，尚未实现）** | 下表是 v1 为加徽章流水线规划的落位。**目前 `addbadge/` 下只有 `README.md`**，其余文件尚未创建——第二阶段实现时按此表落位。 |
+| **（v3 已全部落地）** | 下表是 v1 为加徽章流水线规划的落位，v3 已按此表实现；另新增 `compile.ts`（两条路径合流 + 写盘前静态检查）、`state.ts`（状态文件 + 锁）、`submit.ts` / `child.ts`（detached 子进程）、`watch.ts`（只读状态文件的观察者）、`commands.ts`（子命令编排）。权威使用说明见 `tools/admin/src/addbadge/README.md`。 |
 | `tools/admin/src/addbadge/spec.ts` | 条件 spec 的类型 + 手写校验器（不用 zod/ajv） |
 | `tools/admin/src/addbadge/build.ts` | `toSource()` / `toPredicate()` 两个后端 |
 | `tools/admin/src/addbadge/families.ts` | 家族文件与 id/name 清单的读取（只读） |

@@ -51,7 +51,41 @@ describe('参数解析（node:util.parseArgs，无第三方依赖）', () => {
   });
 
   it('未知子命令被拒绝', () => {
-    expect(() => parseAdminArgs(['add-badge'])).toThrow(UsageError);
+    // `add-badge` 在第二阶段已实现（见 addbadge/）；这里换一个确定不存在的子命令，
+    // 断言强度不变：任何未实现的子命令都必须被拒。
+    expect(() => parseAdminArgs(['bulk-import'])).toThrow(UsageError);
+  });
+});
+
+describe('add-badge / rollback 子命令参数', () => {
+  it('--spec 与默认行为（等待、不强制）', () => {
+    const args = parseAdminArgs(['add-badge', '--spec', 'new-badge.json']);
+    expect(args).toMatchObject({ command: 'add-badge', specPath: 'new-badge.json', force: false, wait: true });
+  });
+
+  it('--ts 需要元数据，非法 family 被拒', () => {
+    expect(() => parseAdminArgs(['add-badge', '--ts', 'c => c.r > 0', '--family', 'nope'])).toThrow(UsageError);
+    const args = parseAdminArgs([
+      'add-badge', '--ts', 'c => c.r > 0', '--id', 'x', '--name', '甲', '--description', 'd', '--family', 'gray',
+    ]);
+    expect(args).toMatchObject({ command: 'add-badge', ts: 'c => c.r > 0', family: 'gray' });
+  });
+
+  it('--helper-eval 可重复，--no-wait 关掉等待', () => {
+    const args = parseAdminArgs([
+      'add-badge', '--ts', 'f(c)', '--id', 'x', '--name', '甲', '--description', 'd', '--family', 'casino',
+      '--helper-eval', 'f=c => true', '--helper-eval', 'g=c => false', '--no-wait',
+    ]);
+    expect(args).toMatchObject({ helperEvals: ['f=c => true', 'g=c => false'], wait: false });
+  });
+
+  it('吃掉 pnpm 传下来的 `--` 分隔符（文档推荐的写法）', () => {
+    expect(parseAdminArgs(['add-badge', '--', '--spec', 'x.json'])).toMatchObject({ command: 'add-badge', specPath: 'x.json' });
+    expect(parseAdminArgs(['ui', '--', '--port', '0'])).toMatchObject({ command: 'ui', port: 0 });
+  });
+
+  it('rollback 需要 --snapshot', () => {
+    expect(parseAdminArgs(['rollback', '--snapshot', '/tmp/s'])).toMatchObject({ command: 'rollback', snapshot: '/tmp/s' });
   });
 });
 
