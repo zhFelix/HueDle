@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { allBadges } from '../src/badges/index';
+import { allBadgeDefs } from '../src/badges/defs';
 import { toColorInfo } from '../src/color';
 import { TOTAL_COLORS } from '../src/pricing';
 import { PRICING } from '../src/pricing.gen';
@@ -335,7 +336,7 @@ describe('取代（supersession）审计', () => {
           '- ⚠️ 任务提示「分布底部有一个 176,788 色的大原子，只命中 `casino-pair` 一条」指的是**全表**',
         );
         L.push(
-          '  （76 条徽章中只有 `casino-pair` 命中，故总分恰为最小）；那只是「组内仅 pair 命中」集合中',
+          `  （${allBadgeDefs.length} 条徽章中只有 \`casino-pair\` 命中，故总分恰为最小）；那只是「组内仅 pair 命中」集合中`,
         );
         L.push(
           '  额外不命中任何非组徽章的一小部分，**不是**取代比例的分母/补集，因此不能用它推出「接近 100% 被取代」。',

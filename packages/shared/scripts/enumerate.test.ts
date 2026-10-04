@@ -630,7 +630,7 @@ describe('全色域枚举 → 定价数据 + 迁移报告', () => {
       L.push('### 5.3 空徽章（`hits === 0`）—— 严重问题');
       L.push('');
       if (emptyBadges.length === 0) {
-        L.push('**无。** 76 条徽章在全色域上均至少命中 1 个颜色，不存在永不命中的规则。✅');
+        L.push(`**无。** ${badgeCount} 条徽章在全色域上均至少命中 1 个颜色，不存在永不命中的规则。✅`);
       } else {
         L.push(`🚨 **共 ${emptyBadges.length} 条徽章 \`hits === 0\`，它们永远不会命中、永远无法获得：**`);
         L.push('');
@@ -799,7 +799,7 @@ describe('全色域枚举 → 定价数据 + 迁移报告', () => {
       L.push(
         '- `PRICING` 未接入 `calculateScore`；`SCORE_THRESHOLDS` / `getRarity` 仍是旧模型，`docs/BADGES.md` 也仍是旧 CP（本阶段严禁改动）；',
       );
-      L.push('- 未验证 76 条两两之间的包含/重叠关系在 ep 权重下是否会产生新的「静默吞分」组合。');
+      L.push(`- 未验证 ${badgeCount} 条两两之间的包含/重叠关系在 ep 权重下是否会产生新的「静默吞分」组合。`);
       L.push('');
       L.push('## 7. 复现记录');
       L.push('');

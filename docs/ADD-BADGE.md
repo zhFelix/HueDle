@@ -233,14 +233,9 @@ pnpm -C packages/shared test               # 177 例
 
 ## 附：当前徽章分布
 
-共 **76 条 / 10 个家族**：
+当前总数与各家族条数**以 [BADGES.md](BADGES.md) 为准**（自动生成，每次重跑 `enumerate` 会更新）。
 
-| 家族 | 条数 |      | 家族 | 条数 |
-|---|---:|---|---|---:|
-| gray | 6 | | pattern | 8 |
-| extreme | 6 | | culture | 8 |
-| pure | 6 | | lucky | 6 |
-| channel | 6 | | casino | 12 |
-| math | 10 | | perception | 8 |
+这里刻意不写死数字：徽章会持续增补，写死的数量会在下次增补时无声过期——
+而文档里的错误数字比没有数字更糟，因为有人会照它做判断。
 
 稀有度分布（**由概率算出，非配额**）：`common 11 / uncommon 11 / rare 14 / epic 8 / anomaly 16 / mythic 16`
