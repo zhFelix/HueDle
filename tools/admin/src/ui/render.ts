@@ -11,11 +11,19 @@
  *      于是页面里**没有任何 `<script>`、没有任何外部资源**，断网也能用（硬约束⑥/测试 6）；
  *   3. 每个数字都来自 {@link StatsReport}，本文件不碰数据库——只读通道因此只有一条。
  *
+ * 版面（本次改动的全部范围，只动表现层）：
+ *   - 顶部「概览区」：抽取数 / 玩家数 / 新用户 / 一次性用户占比，四个大数字；
+ *   - M1–M8 每张指标一张**卡片**（标题 + 它回答什么问题 + 表格 + 注），卡片之间有间隔；
+ *   - 长表格沿用 `<details>` 默认折叠（前 N 行可见，其余折起）。
+ *   概览里的"新用户 / 一次性用户占比"不是新的查询口径，而是对已经查回来的
+ *   M2 / M3 两张表的**展示层合计**（见 {@link sumColumn}）——避免为了好看在多处再写一遍 SQL。
+ *
  * 用户名（PII）：只有当 `report.namesRequested` 为真（`--include-names`）才渲染，
  * 且只渲染在**这个页面**里；本服务不写任何文件，所以 PII 不会落盘。
  */
-import type { StatsReport } from '../report';
+import type { StatsReport, SectionResult } from '../report';
 import type { Table } from '../analyze';
+import { fmtInt, fmtShare } from '../analyze';
 import { escapeHtml } from '../render/html';
 
 /** 可切换的时间窗口（至少 7 / 30 / 90）。 */
@@ -23,6 +31,14 @@ export const UI_WINDOWS: readonly number[] = [7, 30, 90];
 
 /** 表格默认显示多少行；超出部分折进 `<details>`。 */
 export const UI_ROW_LIMIT = 10;
+
+/** 概览区四项的标题（测试与页面共用同一份字面量，避免两处漂移）。 */
+export const UI_OVERVIEW_LABELS: readonly string[] = [
+  '窗口内抽取数',
+  '窗口内玩家数',
+  '新用户',
+  '一次性用户占比',
+];
 
 /** 页内样式：内联字符串，**没有** `<link>`、没有外部字体/图标。 */
 const UI_CSS = `
@@ -45,6 +61,19 @@ const UI_CSS = `
   .meta, .note, .caption { color: #666; font-size: .8rem; margin: .2rem 0; }
   .warning { color: #b00; }
   .names { border-left: 3px solid #b60; padding-left: .75rem; }
+
+  /* 概览区：四五个大数字，一眼扫到。 */
+  .overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .75rem; margin: 1.25rem 0 1.75rem; }
+  .stat { margin: 0; border: 1px solid #8885; border-radius: .5rem; padding: .75rem 1rem .85rem; background: #8881; }
+  .stat figcaption { color: #666; font-size: .8rem; }
+  .stat-value { font-size: 2.1rem; font-weight: 700; line-height: 1.15; margin: .2rem 0 .1rem; font-variant-numeric: tabular-nums; }
+  .stat-note { color: #666; font-size: .72rem; margin: 0; }
+
+  /* 指标卡片：每个指标一块，卡片之间留出明显间隔。 */
+  main { margin-top: 1.5rem; }
+  main section.card { margin: 0 0 1.25rem; border: 1px solid #8885; border-radius: .5rem; padding: .9rem 1.1rem 1rem; background: #8881; }
+  .card h2 { border-bottom: 1px solid #8884; padding-bottom: .35rem; }
+  .question { color: #666; font-size: .8rem; margin: .35rem 0 .5rem; }
 `;
 
 function renderTable(table: Table, limit: number): string {
@@ -107,6 +136,70 @@ ${body}
 </section>`;
 }
 
+/**
+ * 把某一列的已格式化数字全部加起来；列不存在（或该指标缺失）时返回 `undefined`。
+ *
+ * 这是**展示层的合计**，不新增任何查询：M2 的「新增」列合计即窗口内新用户数，
+ * M3 的「只抽过一天」/「用户数」合计即一次性用户占比。非有限值（`—`）跳过。
+ */
+function sumColumn(section: SectionResult | undefined, column: string): number | undefined {
+  if (!section) return undefined;
+  const index = section.table.columns.indexOf(column);
+  if (index < 0) return undefined;
+  let total = 0;
+  for (const row of section.table.rows) {
+    const value = Number(row[index]);
+    if (Number.isFinite(value)) total += value;
+  }
+  return total;
+}
+
+/**
+ * 顶部概览区：四个大数字（抽取数 / 玩家数 / 新用户 / 一次性用户占比）。
+ *
+ * 前两个直接来自 `report.totals`；后两个来自 M2/M3 表格列的展示层合计。
+ */
+function renderOverview(report: StatsReport): string {
+  const m2 = report.sections.find(section => section.id === 'M2');
+  const m3 = report.sections.find(section => section.id === 'M3');
+
+  const newUsers = sumColumn(m2, '新增');
+  const allUsers = sumColumn(m3, '用户数');
+  const oneDayUsers = sumColumn(m3, '只抽过一天');
+  const oneDayShare =
+    oneDayUsers === undefined || allUsers === undefined ? '—' : fmtShare(oneDayUsers, allUsers);
+
+  const [drawsLabel, playersLabel, newLabel, shareLabel] = UI_OVERVIEW_LABELS;
+  const items: Array<[string, string, string]> = [
+    [drawsLabel, fmtInt(report.totals.draws), `最近 ${report.windowDays} 天的 daily_results 行数`],
+    [playersLabel, fmtInt(report.totals.players), `最近 ${report.windowDays} 天有过抽取的玩家数`],
+    [
+      newLabel,
+      newUsers === undefined ? '—' : fmtInt(newUsers),
+      '窗口内首次出现的玩家（M2「新增」列合计）',
+    ],
+    [
+      shareLabel,
+      oneDayShare,
+      '只抽过一天的用户 / 全部用户（M3 合计；全量口径，非窗口口径）',
+    ],
+  ];
+
+  const figures = items
+    .map(
+      ([label, value, note]) => `<figure class="stat">
+<figcaption>${escapeHtml(label)}</figcaption>
+<p class="stat-value">${escapeHtml(value)}</p>
+<p class="stat-note">${escapeHtml(note)}</p>
+</figure>`,
+    )
+    .join('\n');
+
+  return `<section class="overview" id="overview" aria-label="窗口概览">
+${figures}
+</section>`;
+}
+
 /** 渲染整页。所有来自数据库的文本都过 {@link escapeHtml}。 */
 export function renderUiPage(report: StatsReport, options: UiPageOptions): string {
   const limit = options.rowLimit ?? UI_ROW_LIMIT;
@@ -117,9 +210,9 @@ export function renderUiPage(report: StatsReport, options: UiPageOptions): strin
 
   const sections = report.sections
     .map(
-      section => `<section id="${escapeHtml(section.id)}">
+      section => `<section class="card" id="${escapeHtml(section.id)}">
 <h2>${escapeHtml(section.id)} ${escapeHtml(section.title)}</h2>
-<p class="meta">问：${escapeHtml(section.question)}</p>
+<p class="question">问：${escapeHtml(section.question)}</p>
 ${renderTable(section.table, limit)}
 ${section.notes.map(note => `<p class="note">注：${escapeHtml(note)}</p>`).join('\n')}
 </section>`,
@@ -143,10 +236,10 @@ ${section.notes.map(note => `<p class="note">注：${escapeHtml(note)}</p>`).joi
 <h1>HueDle 只读统计 UI</h1>
 <p class="meta">窗口：最近 ${report.windowDays} 天（起始 ${escapeHtml(report.windowStart)}）；生成时间：${escapeHtml(report.generatedAt)}</p>
 <p class="meta">连接：${escapeHtml(report.connection)}</p>
-<p class="meta">窗口总计：抽取 ${report.totals.draws} 次 / 玩家 ${report.totals.players} 人</p>
 <p class="meta">本服务只监听 127.0.0.1，只有 GET 路由，无登录、无 CORS、不写任何文件；所有查询走只读事务。</p>
 </header>
 <nav aria-label="时间窗口">窗口：${renderWindows(options.days)} ${renderRefresh(options.days)}</nav>
+${renderOverview(report)}
 <nav class="metrics" aria-label="指标跳转">指标：${metricsNav}</nav>
 ${warnings}
 <main>

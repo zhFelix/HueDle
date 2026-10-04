@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { contextForDraws, M4_MIN_DRAWS } from '../analyze';
 import { analyzeMetric } from '../run';
 import { METRICS } from '../stats';
-import { renderUiError, renderUiPage, UI_ROW_LIMIT, UI_WINDOWS } from '../ui/render';
+import { renderUiError, renderUiPage, UI_OVERVIEW_LABELS, UI_ROW_LIMIT, UI_WINDOWS } from '../ui/render';
 import { escapeHtml } from '../render/html';
 import type { Table } from '../analyze';
 import { sampleReport, SECRET_USERNAME } from './fixtures';
@@ -227,5 +227,92 @@ describe('转义与健壮性', () => {
   it('warnings 会被显示出来', () => {
     const page = renderUiPage(sampleReport({ warnings: ['M8：bad_hex = 1（应为 0）。'] }), { days: 30 });
     expect(page).toContain('bad_hex = 1');
+  });
+});
+
+/** 从概览区里取出某个大数字（figcaption 紧跟着 stat-value）。 */
+function overviewValue(html: string, label: string): string | undefined {
+  const match = html.match(
+    new RegExp(`<figcaption>${label}</figcaption>\\s*<p class="stat-value">([^<]*)</p>`),
+  );
+  return match?.[1];
+}
+
+describe('概览区：四个大数字', () => {
+  // 确定数据：totals 给 1000/8；M2「新增」= 1+2 = 3；M3 用户 4+5=9、只抽过一天 1+2=3 → 33.33%。
+  const report = sampleReport({
+    totals: { draws: 1000, players: 8 },
+    sections: [
+      {
+        id: 'M2',
+        title: '新增用户 vs 回访用户',
+        question: '增长是从哪来的？',
+        table: {
+          columns: ['日期', '新增', '回访'],
+          rows: [['2026-01-01', '1', '4'], ['2026-01-02', '2', '3']],
+        },
+        notes: [],
+      },
+      {
+        id: 'M3',
+        title: '沉默用户分桶 + 一次性用户占比',
+        question: '召回值不值得做？',
+        table: {
+          columns: ['沉默天数', '用户数', '只抽过一天'],
+          rows: [['0', '4', '1'], ['1-7', '5', '2']],
+        },
+        notes: [],
+      },
+    ],
+  });
+  const html = renderUiPage(report, { days: 30 });
+
+  it('四项标题齐备，且出现在概览区（header 之后、指标锚点之前）', () => {
+    expect(html).toContain('class="overview"');
+    for (const label of UI_OVERVIEW_LABELS) expect(html).toContain(label);
+    expect(html.indexOf('class="overview"')).toBeLessThan(html.indexOf('指标：'));
+  });
+
+  it('四个数字都正确（含由 M2/M3 列合计得出的两项）', () => {
+    expect(overviewValue(html, '窗口内抽取数')).toBe('1000');
+    expect(overviewValue(html, '窗口内玩家数')).toBe('8');
+    expect(overviewValue(html, '新用户')).toBe('3');
+    expect(overviewValue(html, '一次性用户占比')).toBe('33.33%');
+  });
+
+  it('数据缺失时降级成「—」，不崩、不出现 NaN', () => {
+    const bare = renderUiPage(sampleReport({ totals: { draws: 0, players: 0 }, sections: [] }), { days: 30 });
+    expect(overviewValue(bare, '新用户')).toBe('—');
+    expect(overviewValue(bare, '一次性用户占比')).toBe('—');
+    expect(bare).not.toContain('NaN');
+  });
+});
+
+describe('卡片：每个指标一张卡 + 回答什么问题 + 长表格默认折叠', () => {
+  const html = renderUiPage(buildFullReport(), { days: 30 });
+
+  it('每个指标都是一张 card，且卡片里出现它回答什么问题（复用 stats.ts 的 question）', () => {
+    for (const metric of METRICS) {
+      expect(html).toContain(`<section class="card" id="${metric.id}">`);
+      expect(html).toContain(escapeHtml(metric.question));
+    }
+    expect(html.match(/<section class="card"/g)).toHaveLength(METRICS.length);
+  });
+
+  it('长表格折进 <details>，默认不带 open（浏览器原生折叠）', () => {
+    const page = renderUiPage(
+      tableReport({ columns: ['周', '稀有度', '数量', '占比'], rows: longRows(25, 'w') }),
+      { days: 30 },
+    );
+    expect(page).toContain('<details class="more">');
+    expect(page).not.toContain('<details open');
+    expect(page).not.toMatch(/<details[^>]*\sopen/);
+  });
+
+  it('卡片页依旧无 <script>、无外链（断网可用）', () => {
+    expect(html.toLowerCase()).not.toContain('<script');
+    expect(html).not.toContain('http://');
+    expect(html).not.toContain('https://');
+    expect(html.toLowerCase()).not.toContain('<link');
   });
 });
