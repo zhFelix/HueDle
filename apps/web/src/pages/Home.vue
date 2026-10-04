@@ -20,6 +20,7 @@ import ColorCard from '../components/ColorCard.vue';
 import DrawButton from '../components/DrawButton.vue';
 import HexRoller from '../components/HexRoller.vue';
 import RarityBadge from '../components/RarityBadge.vue';
+import ShareButton from '../components/ShareButton.vue';
 import { useDailyColor } from '../composables/useDailyColor';
 import { formatCp } from '../lib/format';
 
@@ -141,6 +142,14 @@ async function handleSettled(): Promise<void> {
       </section>
 
       <BadgeList :badges="result.scoringBadges" :superseded="result.supersededBadges" />
+
+      <ShareButton
+        :hex="color.hex"
+        :cp="result.cp"
+        :rarity="result.rarity"
+        :badges="result.scoringBadges"
+        :date="historyItem.date"
+      />
     </div>
   </div>
 </template>
