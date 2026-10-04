@@ -14,6 +14,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseAdminArgs, USAGE, UsageError, type UiCommand } from './argv';
+import { createCachedReportLoader } from './cache';
 import { createReadOnlyPool, redactSecrets, requireDatabaseUrl } from './db';
 import { renderHtml } from './render/html';
 import { renderText } from './render/text';
@@ -55,11 +56,20 @@ async function runUi(args: UiCommand, env: EnvLike): Promise<number> {
 
   try {
     const pool = createReadOnlyPool(requireDatabaseUrl());
+    // 缓存只在 UI 进程内（内存 Map，不落盘）：同一窗口的重复访问不必重跑跨洋查询。
+    // 键含 includeNames —— 带用户名的报告绝不会被无用户名的请求命中。
+    const cached = createCachedReportLoader(key =>
+      runStats(pool, { days: key.days, includeNames: key.includeNames, topN: key.topN }),
+    );
     const server = createUiServer({
       initialDays: args.days,
       // ④ 唯一的取数通道：与 CLI 完全相同的 runStats（db.ts 的 BEGIN READ ONLY）。
-      loadReport: days =>
-        runStats(pool, { days, includeNames: args.includeNames, topN: UI_ANALYZE_TOP_N }),
+      // ?refresh=1 时绕过缓存，但仍然走同一条只读通道。
+      loadReport: (days, options) =>
+        cached.loadReport(
+          { days, includeNames: args.includeNames, topN: UI_ANALYZE_TOP_N },
+          { refresh: options?.refresh === true },
+        ),
     });
 
     // ① 地址写死在 listenUiServer 里（127.0.0.1），端口可传 0 让内核分配。

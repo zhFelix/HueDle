@@ -84,6 +84,14 @@ function renderWindows(days: number): string {
   }).join('');
 }
 
+/**
+ * 手动刷新链接：服务端缓存最多存活 60 秒（见 `src/cache.ts`），
+ * `?refresh=1` 立即绕过缓存重查。仍然是 GET、仍然只读——只是"不省这一次"。
+ */
+function renderRefresh(days: number): string {
+  return `<a href="?days=${days}&refresh=1" title="忽略本机缓存，重新查询数据库（最多比平时多花几秒）">强制刷新</a>`;
+}
+
 function renderNames(report: StatsReport): string {
   if (!report.namesRequested) return '';
   const rows = report.names
@@ -138,7 +146,7 @@ ${section.notes.map(note => `<p class="note">注：${escapeHtml(note)}</p>`).joi
 <p class="meta">窗口总计：抽取 ${report.totals.draws} 次 / 玩家 ${report.totals.players} 人</p>
 <p class="meta">本服务只监听 127.0.0.1，只有 GET 路由，无登录、无 CORS、不写任何文件；所有查询走只读事务。</p>
 </header>
-<nav aria-label="时间窗口">窗口：${renderWindows(options.days)}</nav>
+<nav aria-label="时间窗口">窗口：${renderWindows(options.days)} ${renderRefresh(options.days)}</nav>
 <nav class="metrics" aria-label="指标跳转">指标：${metricsNav}</nav>
 ${warnings}
 <main>

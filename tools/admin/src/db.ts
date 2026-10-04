@@ -4,6 +4,8 @@
  * 只读是**三层**的（见 docs/ADMIN.md §6.3），任何一层单独都不算数：
  *   1. 连接级：pool 的 `options` 带 `-c default_transaction_read_only=on`；
  *   2. 事务级：每条查询包在 `BEGIN READ ONLY` 里（服务端保证），并 `SET LOCAL statement_timeout='30s'`；
+ *      {@link runReadOnlyBatch} 会让**多条独立查询共用一个** `BEGIN READ ONLY` 事务来省跨洋往返，
+ *      事务仍然由 PG 强制只读（并发下试写照样 25006，见 `readonly.db.test.ts`）；
  *   3. 应用级：{@link assertReadOnlySql} 要求 SQL 以 `SELECT`/`WITH` 开头。
  *
  * 注意：Supabase 的连接池（Supavisor）会**吃掉 libpq 的 `options`**（apps/api/src/db/index.ts 有实测记录），
@@ -15,7 +17,7 @@
  */
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { Pool, type PoolConfig, type QueryResultRow } from 'pg';
+import { Pool, type PoolClient, type PoolConfig, type QueryResultRow } from 'pg';
 
 /** `<repo>/apps/api/.env` 的绝对路径（从 `tools/admin/src/db.ts` 往上三级）。 */
 export const API_ENV_PATH = fileURLToPath(new URL('../../../apps/api/.env', import.meta.url));
@@ -136,6 +138,32 @@ export class AdminDbError extends Error {
 }
 
 /**
+ * 打开一个**服务端强制只读**的事务，并把语句超时设成 `SET LOCAL`（随事务生效）。
+ *
+ * `BEGIN READ ONLY` 与 `SET LOCAL` 合并进**一次** simple query（无参数），
+ * 因为在悉尼这种 RTT 主导的库上，事务开销本身就是 2 次跨洋往返；
+ * 合并后语义不变：`transaction_read_only=on`、`statement_timeout=30s`（有测试断言）。
+ */
+async function beginReadOnly(client: PoolClient): Promise<void> {
+  await client.query(`BEGIN READ ONLY; SET LOCAL statement_timeout = '${STATEMENT_TIMEOUT}'`);
+}
+
+/** 回滚但**不覆盖**原始错误：事务已被服务端终止时 ROLLBACK 也会失败。 */
+async function rollbackQuietly(client: PoolClient): Promise<void> {
+  try {
+    await client.query('ROLLBACK');
+  } catch {
+    // 忽略：原始错误更重要。
+  }
+}
+
+/** 统一把驱动错误包成带 SQLSTATE 的 {@link AdminDbError}（message 已脱敏）。 */
+function asAdminDbError(err: unknown): AdminDbError {
+  if (err instanceof Error) return new AdminDbError(err.message, (err as { code?: string }).code);
+  return new AdminDbError(String(err), undefined);
+}
+
+/**
  * 低层：在 `BEGIN READ ONLY` 事务里执行一条 SQL，**不做应用级守卫**。
  *
  * 存在的唯一理由是让测试能绕过 {@link assertReadOnlySql} 直接验证
@@ -149,21 +177,13 @@ export async function runInReadOnlyTransaction<T extends QueryResultRow>(
 ): Promise<T[]> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN READ ONLY');
-    await client.query(`SET LOCAL statement_timeout = '${STATEMENT_TIMEOUT}'`);
+    await beginReadOnly(client);
     const result = await client.query<T>(sql, params);
     await client.query('ROLLBACK');
     return result.rows;
   } catch (err) {
-    try {
-      await client.query('ROLLBACK');
-    } catch {
-      // 事务已经被服务端终止时 ROLLBACK 也会失败：忽略，原始错误更重要。
-    }
-    if (err instanceof Error) {
-      throw new AdminDbError(err.message, (err as { code?: string }).code);
-    }
-    throw new AdminDbError(String(err), undefined);
+    await rollbackQuietly(client);
+    throw asAdminDbError(err);
   } finally {
     client.release();
   }
@@ -177,4 +197,78 @@ export async function runReadOnlyQuery<T extends QueryResultRow>(
 ): Promise<T[]> {
   assertReadOnlySql(sql);
   return runInReadOnlyTransaction<T>(pool, sql, params);
+}
+
+/** 批量执行里的单条查询。 */
+export interface ReadOnlyBatchRequest {
+  sql: string;
+  params?: unknown[];
+}
+
+/**
+ * 一次拿一条连接，开**一个** `BEGIN READ ONLY` 事务，串行跑完整批查询，再 ROLLBACK。
+ *
+ * 为什么值得：本工具的库在悉尼，服务端算力不是瓶颈（窗口内只有个位数行），
+ * 时间全花在"每条查询 4 次跨洋往返（BEGIN/SET/SELECT/ROLLBACK）"上。
+ * 共用事务把这一批的往返从 `4 × N` 降到 `2 + N`，
+ * 而只读由 PG 在**事务**粒度强制——共用不会让它变成可写。
+ *
+ * 失败语义与逐条执行一致：任意一条失败就整体抛出（首个错误），其余作废。
+ * 返回数组与入参**一一对应**（含空数组）。
+ */
+export async function runReadOnlyBatch<T extends QueryResultRow>(
+  pool: Pool,
+  requests: readonly ReadOnlyBatchRequest[],
+): Promise<T[][]> {
+  for (const request of requests) assertReadOnlySql(request.sql);
+  const client = await pool.connect();
+  try {
+    await beginReadOnly(client);
+    const out: T[][] = [];
+    for (const request of requests) {
+      const result = await client.query<T>(request.sql, request.params ?? []);
+      out.push(result.rows);
+    }
+    await client.query('ROLLBACK');
+    return out;
+  } catch (err) {
+    await rollbackQuietly(client);
+    throw asAdminDbError(err);
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * 把一批**彼此独立**的查询摊到最多 `concurrency` 条连接上并行执行（每条连接各自一个只读事务）。
+ *
+ * 每条连接内部仍是串行（一次往返一次），所以这是"用连接数换墙上时间"；
+ * 默认并发度由调用方按连接池上限决定，避免为提速而放大对生产库的连接占用。
+ * 顺序契约：返回数组与入参一一对应，与分片方式无关。
+ */
+export async function runReadOnlyBatches<T extends QueryResultRow>(
+  pool: Pool,
+  requests: readonly ReadOnlyBatchRequest[],
+  concurrency: number,
+): Promise<T[][]> {
+  if (requests.length === 0) return [];
+  for (const request of requests) assertReadOnlySql(request.sql);
+
+  const width = Math.max(1, Math.min(Math.trunc(concurrency) || 1, requests.length));
+  const chunks: Array<Array<{ index: number; request: ReadOnlyBatchRequest }>> = Array.from(
+    { length: width },
+    () => [],
+  );
+  requests.forEach((request, index) => chunks[index % width]!.push({ index, request }));
+
+  const rowsByIndex: T[][] = new Array(requests.length);
+  await Promise.all(
+    chunks.map(async chunk => {
+      const rows = await runReadOnlyBatch<T>(pool, chunk.map(item => item.request));
+      chunk.forEach((item, offset) => {
+        rowsByIndex[item.index] = rows[offset] ?? [];
+      });
+    }),
+  );
+  return rowsByIndex;
 }

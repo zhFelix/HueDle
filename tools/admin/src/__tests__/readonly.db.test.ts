@@ -16,6 +16,7 @@ import {
   createReadOnlyPool,
   requireDatabaseUrl,
   runInReadOnlyTransaction,
+  runReadOnlyBatch,
   runReadOnlyQuery,
 } from '../db';
 
@@ -88,5 +89,61 @@ describe('只读由数据库强制（SQLSTATE 25006）', () => {
     );
     expect(rows[0]?.ro).toBe('on');
     expect(rows[0]?.timeout).toBe('30s');
+  });
+});
+
+describe('共享/并行的只读事务仍然只读（runReadOnlyBatch）', () => {
+  it('一个批次 = 一个只读事务：事务级只读与超时都生效', async () => {
+    const [, settings] = await runReadOnlyBatch<{ ro: string; timeout: string }>(pool, [
+      { sql: 'SELECT 1::int AS ok' },
+      {
+        sql: "SELECT current_setting('transaction_read_only') AS ro, current_setting('statement_timeout') AS timeout",
+      },
+      { sql: 'SELECT 2::int AS ok' },
+    ]);
+    expect(settings[0]?.ro).toBe('on');
+    expect(settings[0]?.timeout).toBe('30s');
+  });
+
+  it('批次入口的应用级守卫拒绝写语句（甚至不会进事务）', async () => {
+    await expect(
+      runReadOnlyBatch(pool, [
+        { sql: 'SELECT 1::int AS ok' },
+        { sql: "DELETE FROM daily_results WHERE date = '__admin_readonly_probe__'" },
+      ]),
+    ).rejects.toThrow();
+  });
+
+  it('并发场景：一个共享只读事务在途时，另一个连接上的写仍被 PG 拒绝（25006）', async () => {
+    // 用 pg_sleep 把第一个连接的只读事务按住 0.5s；期间在第二个连接上试写。
+    const inFlight = runReadOnlyBatch(pool, [
+      { sql: 'SELECT pg_sleep(0.5)' },
+      { sql: 'SELECT 1::int AS ok' },
+    ]);
+
+    let caught: unknown;
+    try {
+      await runInReadOnlyTransaction(
+        pool,
+        'INSERT INTO daily_results (user_id, date, hex, cp, rarity, badge_ids, created_at) '
+        + `VALUES ('__admin_readonly_probe__', '${PROBE_DATE}', '#000000', 1, 'common', '[]', '2026-01-01T00:00:00.000Z')`,
+      );
+    } catch (err) {
+      caught = err;
+    }
+
+    await expect(inFlight).resolves.toHaveLength(2);
+    expect(caught, '并发只读事务进行中时写入竟然没被拒绝').toBeInstanceOf(AdminDbError);
+    expect((caught as AdminDbError).code).toBe('25006');
+    expect((caught as Error).message).toMatch(/read-only transaction/i);
+  });
+
+  it('批次返回顺序与入参一一对应（并行分片不会错位）', async () => {
+    const rows = await runReadOnlyBatch<{ n: number }>(pool, [
+      { sql: 'SELECT 1::int AS n' },
+      { sql: 'SELECT 2::int AS n' },
+      { sql: 'SELECT 3::int AS n' },
+    ]);
+    expect(rows.map(r => r[0]?.n)).toEqual([1, 2, 3]);
   });
 });

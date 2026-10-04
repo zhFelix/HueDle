@@ -1,15 +1,25 @@
 /**
  * 统计编排：跑 M1–M8，把原始行交给纯函数渲染器，产出 {@link StatsReport}。
  *
- * 所有查询走 {@link runReadOnlyQuery}（应用级守卫 + `BEGIN READ ONLY`），串行执行，不并发轰炸生产库。
+ * 取数策略（由 2026-10 的实测决定）：本工具的库在悉尼，服务端算力不是瓶颈
+ * （窗口内只有个位数行），时间全花在跨洋往返上。因此：
+ *   1. 先构造**全部彼此独立**的查询（窗口总计 / M1–M8 / M8 自检 / 用户名明细）；
+ *   2. 用 {@link runReadOnlyBatches} 摊到最多 {@link ADMIN_POOL_MAX} 条连接上并行，
+ *      每条连接内部复用**一个** `BEGIN READ ONLY` 事务（见 `db.ts`），把事务开销从
+ *      "每条查询 4 次往返"降到"每批 2 次"；
+ *   3. 全部结果齐了再进纯函数分析层——所以 M4 的样本门槛等口径完全没动。
+ *
+ * 只读没有被放松：每条查询仍过 {@link runReadOnlyQuery} 级别的应用守卫（在批次入口），
+ * 且事务由 PG 强制只读（`readonly.db.test.ts` 在并发下验证 25006）。
  */
 import type { Pool, QueryResultRow } from 'pg';
 import { utcDate } from '@huedle/shared';
 import {
+  ADMIN_POOL_MAX,
   createReadOnlyPool,
   redactConnectionString,
   requireDatabaseUrl,
-  runReadOnlyQuery,
+  runReadOnlyBatches,
 } from './db';
 import { METRICS, NAMES_SQL, WINDOW_TOTALS_SQL, type MetricDef, type MetricId, type ParamKey } from './stats';
 import {
@@ -89,42 +99,73 @@ export function analyzeMetric(
   };
 }
 
+/** 待取数的一条查询：`key` 用于把结果对回指标，`sql`/`params` 直接进只读批次。 */
+interface PendingQuery {
+  key: string;
+  sql: string;
+  params: unknown[];
+}
+
+/**
+ * 构造一次报告需要的**全部**查询。它们之间没有依赖：`totals` 只被分析层用来推导
+ * M4 的样本门槛，而不是后续 SQL 的输入，因此可以和 M1–M8 一起并行取回。
+ */
+function buildQueries(start: string, nowIso: string, includeNames: boolean): PendingQuery[] {
+  const queries: PendingQuery[] = [{ key: 'totals', sql: WINDOW_TOTALS_SQL, params: [start] }];
+  for (const metric of METRICS) {
+    queries.push({
+      key: metric.id,
+      sql: metric.sql,
+      params: buildParams(metric.params, start, nowIso),
+    });
+    if (metric.extra) {
+      queries.push({
+        key: `${metric.id}.extra`,
+        sql: metric.extra.sql,
+        params: buildParams(metric.extra.params, start, nowIso),
+      });
+    }
+  }
+  if (includeNames) {
+    queries.push({ key: 'names', sql: NAMES_SQL, params: [] });
+  }
+  return queries;
+}
+
 export async function runStats(pool: Pool, options: RunStatsOptions): Promise<StatsReport> {
   const { days, includeNames } = options;
   const now = options.now ?? new Date();
   const start = utcDate(new Date(now.getTime() - days * 86_400_000));
   const nowIso = now.toISOString();
 
-  const totalsRows = await runReadOnlyQuery<{ draws: number; players: number }>(
+  const queries = buildQueries(start, nowIso, includeNames);
+  // 并发度受连接池上限约束：绝不为了提速而放大对生产库的连接占用。
+  const concurrency = Math.max(1, Math.min(ADMIN_POOL_MAX, queries.length));
+  const rowsByQuery = await runReadOnlyBatches(
     pool,
-    WINDOW_TOTALS_SQL,
-    [start],
+    queries.map(query => ({ sql: query.sql, params: query.params })),
+    concurrency,
   );
+  const rowsByKey = new Map(queries.map((query, index) => [query.key, rowsByQuery[index] ?? []]));
+  const rowsFor = (key: string): QueryResultRow[] => rowsByKey.get(key) ?? [];
+
+  const totalsRows = rowsFor('totals') as Array<{ draws: number; players: number }>;
   const draws = totalsRows[0]?.draws ?? 0;
   const players = totalsRows[0]?.players ?? 0;
   const ctx = contextForDraws(draws, options.topN ?? DEFAULT_CONTEXT.topN);
 
-  const sections: SectionResult[] = [];
-  for (const metric of METRICS) {
-    const params = buildParams(metric.params, start, nowIso);
-    const rows = await runReadOnlyQuery(pool, metric.sql, params);
-    let extraRows: QueryResultRow[] = [];
-    if (metric.extra) {
-      extraRows = await runReadOnlyQuery(
-        pool,
-        metric.extra.sql,
-        buildParams(metric.extra.params, start, nowIso),
-      );
-    }
-    sections.push(analyzeMetric(metric, rows, extraRows, ctx));
-  }
+  const sections: SectionResult[] = METRICS.map(metric =>
+    analyzeMetric(
+      metric,
+      rowsFor(metric.id),
+      metric.extra ? rowsFor(`${metric.id}.extra`) : [],
+      ctx,
+    ),
+  );
 
   let names: NameDetail[] = [];
   if (includeNames) {
-    const nameRows = await runReadOnlyQuery<{ name: string; days: number; last_date: string }>(
-      pool,
-      NAMES_SQL,
-    );
+    const nameRows = rowsFor('names') as Array<{ name: string; days: number; last_date: string }>;
     names = nameRows.map(row => ({ name: row.name, days: row.days, lastDate: row.last_date }));
   }
 

@@ -10,7 +10,8 @@
  *      路由只接受 `GET`/`HEAD`，其余方法一律 405——**根本没有写端点**。
  *   ⑤ 不发任何 CORS 头，不登录，不 daemon 化，不写 pid/文件。
  *
- * 查询参数只有 `?days=`，且必须是 1–3650 的整数；非法值 400，绝不做字符串拼接。
+ * 查询参数只有 `?days=`（1–3650 的整数，非法值 400，绝不做字符串拼接）与
+ * `?refresh=1`（只表示"绕过本机内存缓存重查"，仍然是 GET、仍然只读）。
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { redactSecrets } from '../db';
@@ -49,8 +50,11 @@ export interface UiServerOptions {
   /**
    * 报告来源。生产实现走 `runStats(pool, …)`（`db.ts` 的只读事务），
    * `includeNames` 由该闭包持有；测试注入假实现即可在不起数据库的情况下验证 HTTP 层。
+   *
+   * `options.refresh` 为真（`?refresh=1`）时表示**绕过本机缓存**重查——
+   * 这只是"不省这一次"，取数通道与只读语义完全不变；实现方不支持时可忽略。
    */
-  loadReport: (days: number) => Promise<StatsReport>;
+  loadReport: (days: number, options?: { refresh?: boolean }) => Promise<StatsReport>;
 }
 
 /** `?days=` 的解析结果。 */
@@ -127,8 +131,11 @@ async function handleRequest(
     return;
   }
 
+  // `?refresh=1`：只影响"要不要用本机缓存"，不改变路由、不引入写操作。
+  const refresh = url.searchParams.get('refresh') === '1';
+
   try {
-    const report = await options.loadReport(parsed.days);
+    const report = await options.loadReport(parsed.days, { refresh });
     send(res, 200, renderUiPage(report, { days: parsed.days }), {}, method === 'HEAD');
   } catch (err) {
     // 与 CLI 同口径：错误信息先脱敏，绝不把连接串/密码带进页面。
