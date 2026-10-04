@@ -32,6 +32,64 @@ export const UI_WINDOWS: readonly number[] = [7, 30, 90];
 /** 表格默认显示多少行；超出部分折进 `<details>`。 */
 export const UI_ROW_LIMIT = 10;
 
+/**
+ * 哨兵单元格的状态类名（**表意**，不是装饰）。
+ *
+ * - `ok`：哨兵通过（M1 `OK`、M5 `（无）`、M8 计数为 0）→ 游戏里的 emerald-400；
+ * - `bad`：哨兵破了（M1 `⚠ 约束被破坏`、M5 有幽灵 id、M8 计数非 0）→ 游戏里的 red-300；
+ * - `none`：这一格没有"正常/异常"含义，不上色。
+ *
+ * 三个类名由 {@link CELL_STATE_CLASS} 与测试共用同一份字面量，避免两处漂移。
+ */
+export type CellState = 'ok' | 'bad' | 'none';
+
+export const CELL_STATE_CLASS: Readonly<Record<Exclude<CellState, 'none'>, string>> = {
+  ok: 'state-ok',
+  bad: 'state-bad',
+};
+
+/**
+ * 「没有结论」专用类名。
+ *
+ * **语义：中性。** 「样本不足 / 不给结论」既不是正常也不是异常——它是"这次不判断"，
+ * 所以它绝不能借用 warning/error/danger 的任何类名或色值（黄/红会让人以为数据坏了，
+ * 从而做出错误反应）。反向断言见 `__tests__/ui.theme.test.ts`。
+ */
+export const NEUTRAL_NOTE_CLASS = 'neutral-note';
+
+/** 出现这些措辞的注/表注 = 没有结论，一律走 {@link NEUTRAL_NOTE_CLASS}。 */
+const NO_CONCLUSION_PATTERN = /不给结论|样本不足|未计入|无数据/;
+
+/** 给文本套上「没有结论」的中性类（命中 {@link NO_CONCLUSION_PATTERN} 才加）。 */
+function noteClass(text: string): string {
+  return NO_CONCLUSION_PATTERN.test(text) ? NEUTRAL_NOTE_CLASS : '';
+}
+
+/**
+ * 判断某一格是不是哨兵、以及它的状态。
+ *
+ * 这是**表现层**的判断，只读已经格式化的字符串（不改分析层）：
+ *   - M1 第 4 列（唯一约束）：`OK` / `⚠ 约束被破坏`；
+ *   - M5 第 1 列（幽灵 id）：`（无）` 才是健康；
+ *   - M8 第 2 列（值）：全部应为 0，非 0 即异常。
+ * 其余格子一律 `none`——颜色只用在真的有含义的格子上。
+ */
+export function cellState(sectionId: string, columnIndex: number, cell: string): CellState {
+  if (sectionId === 'M1' && columnIndex === 3) {
+    if (cell === 'OK') return 'ok';
+    return cell.includes('⚠') ? 'bad' : 'none';
+  }
+  if (sectionId === 'M5' && columnIndex === 0) {
+    return cell === '（无）' ? 'ok' : 'bad';
+  }
+  if (sectionId === 'M8' && columnIndex === 1) {
+    const value = Number(cell);
+    if (!Number.isFinite(value)) return 'none';
+    return value === 0 ? 'ok' : 'bad';
+  }
+  return 'none';
+}
+
 /** 概览区四项的标题（测试与页面共用同一份字面量，避免两处漂移）。 */
 export const UI_OVERVIEW_LABELS: readonly string[] = [
   '窗口内抽取数',
@@ -40,54 +98,118 @@ export const UI_OVERVIEW_LABELS: readonly string[] = [
   '一次性用户占比',
 ];
 
-/** 页内样式：内联字符串，**没有** `<link>`、没有外部字体/图标。 */
-const UI_CSS = `
-  :root { color-scheme: light dark; }
+/**
+ * 页内样式：内联字符串，**没有** `<link>`、没有外部字体/图标、没有 `@import`、没有 `url()`。
+ *
+ * 为什么手写而不是用 Tailwind：本工具是"一段 HTML 字符串 + 零构建步骤"（`tsx` 直接跑），
+ * 用不了 `@tailwindcss/vite`。所以下面每一个色值都是**逐字抄**自主题定义：
+ *   - `--ink-*`   ← `apps/web/src/style.css` 的 `@theme` 块；
+ *   - 其余色阶    ← Tailwind v4 默认主题 `tailwindcss/theme.css`（v4 用 oklch 定义，
+ *     这里原样保留 oklch，不做近似换算，避免"看着像"而不是"就是那个值"）。
+ * 观感照 `apps/web/src/pages/Profile.vue` / `components/*.vue`：
+ *   页面底色 ink-950 → 卡片 ink-900 + 1px ink-700 边框 + 1rem 圆角；
+ *   正文 neutral-200，次要文字 neutral-400/500，强调与可点击元素 amber-300/400。
+ */
+export const UI_CSS = `
+  :root {
+    color-scheme: dark;
+    /* ↓↓↓ apps/web/src/style.css 的 @theme（原文照抄） ↓↓↓ */
+    --ink-950: #08090c;
+    --ink-900: #0e1015;
+    --ink-800: #171a21;
+    --ink-700: #23262f;
+    /* ↓↓↓ Tailwind v4 默认主题 tailwindcss/theme.css（原文照抄） ↓↓↓ */
+    --neutral-50: oklch(98.5% 0 none);
+    --neutral-100: oklch(97% 0 none);
+    --neutral-200: oklch(92.2% 0 none);
+    --neutral-300: oklch(87% 0 none);
+    --neutral-400: oklch(70.8% 0 none);
+    --neutral-500: oklch(55.6% 0 none);
+    --neutral-600: oklch(43.9% 0 none);
+    --amber-200: oklch(92.4% 0.12 95.746);
+    --amber-300: oklch(87.9% 0.169 91.605);
+    --amber-400: oklch(82.8% 0.189 84.429);
+    --emerald-400: oklch(76.5% 0.177 163.223);
+    --red-300: oklch(80.8% 0.114 19.571);
+    --red-900: oklch(39.6% 0.141 25.723);
+    --red-950: oklch(25.8% 0.092 26.042);
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans', Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  }
   * { box-sizing: border-box; }
-  body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 0 auto; max-width: 74rem; padding: 1.5rem 1rem 4rem; line-height: 1.5; }
-  h1 { font-size: 1.4rem; margin-bottom: .25rem; }
-  h2 { font-size: 1.05rem; margin: 0 0 .25rem; }
-  nav { display: flex; flex-wrap: wrap; gap: .5rem 1rem; padding: .5rem 0; border-bottom: 1px solid #8884; margin-bottom: 1rem; }
-  nav a { text-decoration: none; border: 1px solid #8886; border-radius: .25rem; padding: .1rem .5rem; }
-  nav a[aria-current="page"] { font-weight: 700; border-color: currentColor; }
+  body {
+    margin: 0 auto; max-width: 74rem; padding: 1.5rem 1rem 4rem; line-height: 1.55;
+    background: var(--ink-950); color: var(--neutral-200);
+    font-family: var(--font-sans); -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-family: var(--font-mono); font-size: 1.5rem; font-weight: 700; letter-spacing: -.01em; color: var(--neutral-50); margin: 0 0 .35rem; }
+  h2 { font-size: 1rem; font-weight: 600; color: var(--neutral-100); margin: 0 0 .25rem; }
+  a { color: var(--amber-300); text-decoration: none; }
+  a:hover { color: var(--amber-200); text-decoration: underline; text-underline-offset: 4px; }
+  nav { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .7rem; padding: .7rem 0; border-bottom: 1px solid var(--ink-800); margin-bottom: 1rem; color: var(--neutral-500); font-size: .8rem; }
+  /* 窗口切换：照 Profile.vue 的「登录 / 注册」胶囊（amber-400 边框 + amber-300 文字） */
+  nav a { border: 1px solid oklch(82.8% 0.189 84.429 / .5); background: oklch(82.8% 0.189 84.429 / .15); color: var(--amber-300); border-radius: 9999px; padding: .15rem .7rem; font-size: .75rem; font-weight: 600; }
+  nav a:hover { background: oklch(82.8% 0.189 84.429 / .25); color: var(--amber-200); text-decoration: none; }
+  nav a[aria-current="page"] { background: var(--amber-400); border-color: var(--amber-400); color: var(--ink-950); }
+  /* 指标锚点：低调的 ink 描边胶囊，不与窗口切换抢注意力 */
   .metrics { border-bottom: none; }
-  .metrics a { border: none; padding: 0 .25rem; }
+  .metrics a { border: 1px solid var(--ink-700); background: none; color: var(--neutral-300); border-radius: 9999px; padding: .1rem .6rem; font-family: var(--font-mono); font-weight: 500; }
+  .metrics a:hover { background: var(--ink-800); border-color: var(--ink-700); color: var(--neutral-100); text-decoration: none; }
   section { margin-top: 1.5rem; scroll-margin-top: 1rem; }
-  table { border-collapse: collapse; width: 100%; margin: .4rem 0; font-size: .85rem; }
-  th, td { border: 1px solid #8884; padding: .2rem .5rem; text-align: left; }
-  th { background: #8882; }
-  details.more { margin: .3rem 0 .6rem; }
-  details.more summary { cursor: pointer; color: #666; font-size: .8rem; }
-  .meta, .note, .caption { color: #666; font-size: .8rem; margin: .2rem 0; }
-  .warning { color: #b00; }
-  .names { border-left: 3px solid #b60; padding-left: .75rem; }
+  table { border-collapse: collapse; width: 100%; margin: .5rem 0; font-size: .85rem; font-family: var(--font-mono); }
+  th, td { border: 1px solid var(--ink-700); padding: .25rem .6rem; text-align: left; }
+  th { background: var(--ink-800); color: var(--neutral-300); font-weight: 600; font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; }
+  /* 正文不用最深的灰：深色底上 neutral-200 才够对比 */
+  td { color: var(--neutral-200); }
+  tbody tr:nth-child(even) { background: var(--ink-800); }
+  /* 哨兵格：正常绿 / 异常红（与游戏 AchievementCard 的 emerald-400、错误态 red-300 同源） */
+  td.state-ok { color: var(--emerald-400); font-weight: 600; }
+  td.state-bad { color: var(--red-300); font-weight: 600; background: oklch(25.8% 0.092 26.042 / .5); border-color: oklch(39.6% 0.141 25.723 / .6); }
+  details.more { margin: .35rem 0 .6rem; }
+  details.more summary { cursor: pointer; color: var(--neutral-400); font-size: .8rem; }
+  details.more summary:hover { color: var(--neutral-200); }
+  .meta, .note, .caption { color: var(--neutral-400); font-size: .8rem; margin: .25rem 0; }
+  /* 「没有结论」= 中性：只借用中性灰，绝不借 warning/error 的任何色值 */
+  .${NEUTRAL_NOTE_CLASS} { color: var(--neutral-400); }
+  .warning { color: var(--red-300); border: 1px solid oklch(39.6% 0.141 25.723 / .6); background: oklch(25.8% 0.092 26.042 / .4); border-radius: .75rem; padding: .45rem .75rem; font-size: .85rem; margin: .5rem 0; }
+  .names { border-left: 3px solid oklch(82.8% 0.189 84.429 / .6); padding-left: .75rem; }
 
-  /* 概览区：四五个大数字，一眼扫到。 */
+  /* 概览区：大数字 + 小标签 + 辅助说明（层级感取自 Profile.vue 的统计区）。 */
   .overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .75rem; margin: 1.25rem 0 1.75rem; }
-  .stat { margin: 0; border: 1px solid #8885; border-radius: .5rem; padding: .75rem 1rem .85rem; background: #8881; }
-  .stat figcaption { color: #666; font-size: .8rem; }
-  .stat-value { font-size: 2.1rem; font-weight: 700; line-height: 1.15; margin: .2rem 0 .1rem; font-variant-numeric: tabular-nums; }
-  .stat-note { color: #666; font-size: .72rem; margin: 0; }
+  .stat { margin: 0; border: 1px solid var(--ink-700); border-radius: 1rem; padding: .9rem 1.05rem 1rem; background: var(--ink-900); }
+  .stat figcaption { color: var(--neutral-500); font-size: .72rem; text-transform: uppercase; letter-spacing: .1em; }
+  .stat-value { font-family: var(--font-mono); font-size: 2.25rem; font-weight: 700; line-height: 1.15; margin: .35rem 0 .2rem; color: var(--neutral-50); font-variant-numeric: tabular-nums; }
+  .stat-note { color: var(--neutral-500); font-size: .72rem; margin: 0; }
 
-  /* 指标卡片：每个指标一块，卡片之间留出明显间隔。 */
+  /* 指标卡片：圆角 + ink-700 边框 + ink-900 底，比页面底色 ink-950 高一层。 */
   main { margin-top: 1.5rem; }
-  main section.card { margin: 0 0 1.25rem; border: 1px solid #8885; border-radius: .5rem; padding: .9rem 1.1rem 1rem; background: #8881; }
-  .card h2 { border-bottom: 1px solid #8884; padding-bottom: .35rem; }
-  .question { color: #666; font-size: .8rem; margin: .35rem 0 .5rem; }
+  main section.card { margin: 0 0 1.25rem; border: 1px solid var(--ink-700); border-radius: 1rem; padding: 1rem 1.1rem 1.1rem; background: var(--ink-900); }
+  .card h2 { border-bottom: 1px solid var(--ink-800); padding-bottom: .45rem; }
+  .question { color: var(--neutral-400); font-size: .8rem; margin: .45rem 0 .5rem; }
 `;
 
-function renderTable(table: Table, limit: number): string {
+function renderTable(table: Table, limit: number, sectionId: string): string {
   const head = `<tr>${table.columns.map(col => `<th>${escapeHtml(col)}</th>`).join('')}</tr>`;
   const rowsHtml = (rows: string[][]): string =>
     rows.length
       ? rows
-          .map(row => `<tr>${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`)
+          .map(
+            row =>
+              `<tr>${row
+                .map((cell, columnIndex) => {
+                  const state = cellState(sectionId, columnIndex, cell);
+                  const className = state === 'none' ? '' : ` class="${CELL_STATE_CLASS[state]}"`;
+                  return `<td${className}>${escapeHtml(cell)}</td>`;
+                })
+                .join('')}</tr>`,
+          )
           .join('\n')
       : `<tr><td colspan="${table.columns.length}">（无数据）</td></tr>`;
 
   const visible = table.rows.slice(0, limit);
   const hidden = table.rows.slice(limit);
-  const caption = table.caption ? `<p class="caption">${escapeHtml(table.caption)}</p>` : '';
+  const captionClass = `caption${noteClass(table.caption ?? '') ? ` ${NEUTRAL_NOTE_CLASS}` : ''}`;
+  const caption = table.caption ? `<p class="${captionClass}">${escapeHtml(table.caption)}</p>` : '';
 
   const full = `<table><thead>${head}</thead><tbody>\n${rowsHtml(visible)}\n</tbody></table>`;
   const more = hidden.length
@@ -213,8 +335,13 @@ export function renderUiPage(report: StatsReport, options: UiPageOptions): strin
       section => `<section class="card" id="${escapeHtml(section.id)}">
 <h2>${escapeHtml(section.id)} ${escapeHtml(section.title)}</h2>
 <p class="question">问：${escapeHtml(section.question)}</p>
-${renderTable(section.table, limit)}
-${section.notes.map(note => `<p class="note">注：${escapeHtml(note)}</p>`).join('\n')}
+${renderTable(section.table, limit, section.id)}
+${section.notes
+  .map(note => {
+    const cls = `note${noteClass(note) ? ` ${NEUTRAL_NOTE_CLASS}` : ''}`;
+    return `<p class="${cls}">注：${escapeHtml(note)}</p>`;
+  })
+  .join('\n')}
 </section>`,
     )
     .join('\n');
