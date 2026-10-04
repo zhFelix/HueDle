@@ -114,4 +114,18 @@ export const cultureBadges: BadgeDef[] = [
     family: 'culture',
     check: c => c.hex === '#FF0000',
   },
+  {
+    id: 'culture-miku-green',
+    name: 'Miku Miku Miku!',
+    description: 'HEX 精确等于 #39C5BB',
+    family: 'culture',
+    check: color => exactHex(color.hex, "#39C5BB"),
+  },
+  {
+    id: 'culture-teto-red',
+    name: 'Teto Teto Teto!',
+    description: 'HEX 精确等于 #B22222',
+    family: 'culture',
+    check: color => exactHex(color.hex, "#B22222"),
+  },
 ];

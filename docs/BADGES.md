@@ -6,7 +6,7 @@
 
 ## 配额看板
 
-- 徽章总数：**126**
+- 徽章总数：**128**
 - 家族数：**10**
 - 取代组（group）：**2** 组，覆盖 **11** 条徽章
 - 被取代关系数：**9**（同组内除 CP 最高者外，计分时会被吞掉的成员数）
@@ -22,7 +22,7 @@
 | math | 数学 | 17 | `#010101` |
 | perception | 感知 | 12 | `#FF6600` |
 | pattern | 模式 | 15 | `#A5A5A5` |
-| culture | 文化 | 15 | `#002FA7` |
+| culture | 文化 | 17 | `#002FA7` |
 | lucky | 玄学 | 10 | `#FFD700` |
 | casino | 牌型 | 16 | `#C8102E` |
 
@@ -35,7 +35,7 @@
 | rare | 23 |
 | epic | 19 |
 | anomaly | 20 |
-| mythic | 31 |
+| mythic | 33 |
 
 ## 家族明细
 
@@ -184,7 +184,7 @@
 
 ### culture — 文化
 
-- 条数：**15**
+- 条数：**17**
 - 代表色：`#002FA7`
 
 | id | 名称 | 判定条件 | 稀有度 | 命中数 | 概率 p | CP (ep) | group |
@@ -204,6 +204,8 @@
 | culture-spotify-green | Spotify 绿 | HEX 精确等于 #1DB954 | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
 | culture-tiktok-pink | TikTok 粉 | HEX 精确等于 #FE2C55 | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
 | culture-youtube-red | YouTube 红 | HEX 精确等于 #FF0000 | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
+| culture-miku-green | Miku Miku Miku! | HEX 精确等于 #39C5BB | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
+| culture-teto-red | Teto Teto Teto! | HEX 精确等于 #B22222 | mythic | 1 | 5.96e-8 | 1,677,721,600 | — |
 
 ### lucky — 玄学
 

@@ -7,12 +7,12 @@
 
 ## 0. 生成指纹
 
-- 徽章条数：**126**
+- 徽章条数：**128**
 - 全色域：16777216（2²⁴）
-- 第一趟（hits）耗时：**134.17 s**
-- 第二趟（总分）耗时：**137.55 s**
-- 两趟合计：**271.72 s**
-- `src/pricing.gen.ts` md5：`cc47e7a6b0ab7a83ba42f4a6a82d9dcc`
+- 第一趟（hits）耗时：**132.20 s**
+- 第二趟（总分）耗时：**135.79 s**
+- 两趟合计：**267.99 s**
+- `src/pricing.gen.ts` md5：`4ae09abd6a888e38a4778b9ed97bc769`
 - 取代组：2 个（`casino-rank-count`、`casino-sequence`），共 11 条成员
 
 ## 1. 总览
@@ -30,9 +30,9 @@
 | `rare` | 23 | 23 | 0 |
 | `epic` | 19 | 19 | 0 |
 | `anomaly` | 20 | 20 | 0 |
-| `mythic` | 31 | 31 | 0 |
+| `mythic` | 31 | 33 | +2 |
 
-- 档位发生变化的条目：**0 / 126**（升档 0，降档 0）
+- 档位发生变化的条目：**0 / 128**（升档 0，降档 0）
 
 ## 2. 逐条对照表（按 `ep` 降序）
 
@@ -45,9 +45,11 @@
 | `culture-instagram-pink` | Instagram 粉 | 1 | 5.960e-8 | 1677721600 | `mythic` | `mythic` | — | = |
 | `culture-klein-blue` | 克莱因蓝 | 1 | 5.960e-8 | 1677721600 | `mythic` | `mythic` | — | = |
 | `culture-marrs-green` | 马尔斯绿 | 1 | 5.960e-8 | 1677721600 | `mythic` | `mythic` | — | = |
+| `culture-miku-green` | Miku Miku Miku! | 1 | 5.960e-8 | 1677721600 | — | `mythic` | — | **新增** |
 | `culture-prussian-blue` | 普鲁士蓝 | 1 | 5.960e-8 | 1677721600 | `mythic` | `mythic` | — | = |
 | `culture-rouge` | 胭脂 | 1 | 5.960e-8 | 1677721600 | `mythic` | `mythic` | — | = |
 | `culture-spotify-green` | Spotify 绿 | 1 | 5.960e-8 | 1677721600 | `mythic` | `mythic` | — | = |
+| `culture-teto-red` | Teto Teto Teto! | 1 | 5.960e-8 | 1677721600 | — | `mythic` | — | **新增** |
 | `culture-tiffany-blue` | 蒂芙尼蓝 | 1 | 5.960e-8 | 1677721600 | `mythic` | `mythic` | — | = |
 | `culture-tiktok-pink` | TikTok 粉 | 1 | 5.960e-8 | 1677721600 | `mythic` | `mythic` | — | = |
 | `culture-titian-red` | 提香红 | 1 | 5.960e-8 | 1677721600 | `mythic` | `mythic` | — | = |
@@ -182,8 +184,8 @@
 | p95 | 24922.294540213643 |
 | p99 | 100529.00982819914 |
 | max | 1946279978.04384 |
-| mean | 12515.1 |
-| 不同取值数 | 140244 |
+| mean | 12715.1 |
+| 不同取值数 | 140245 |
 
 分布形状要点：
 
@@ -202,10 +204,10 @@
 | `trash` | 1 | 0.37968% | 63700 | -0.62032 | max(0.0000, 0.9785) | ⚠️ 由并列块解释 |
 | `common` | 49 | 49.37438% | 8283646 | +0.37438 | max(0.9785, 0.3286) | ⚠️ 由并列块解释 |
 | `uncommon` | 25 | 25.24558% | 4235506 | +0.24558 | max(0.3286, 0.0018) | ⚠️ 由并列块解释 |
-| `rare` | 15 | 15.00000% | 2516583 | +0.00000 | max(0.0018, 0.0009) | ✅ |
+| `rare` | 15 | 15.00000% | 2516582 | -0.00000 | max(0.0018, 0.0009) | ✅ |
 | `epic` | 5 | 5.00014% | 838885 | +0.00014 | max(0.0009, 0.0025) | ✅ |
 | `anomaly` | 4 | 4.00013% | 671110 | +0.00013 | max(0.0025, 0.0012) | ✅ |
-| `mythic` | 1 | 1.00008% | 167786 | +0.00008 | max(0.0012, 0.0000) | ✅ |
+| `mythic` | 1 | 1.00009% | 167787 | +0.00009 | max(0.0012, 0.0000) | ✅ |
 
 - 判定规则：偏差 ≤ 0.05pp 记 ✅；偏差超出但不超过边界并列块占比记 ⚠️（并列块整块只能落在一侧，属分位法的固有分辨率限制）；两者皆不满足记 ❌。
 - 总体：**4 / 7 档偏差 ≤ 0.05pp ✅；另有 3 档偏差由边界并列块解释 ⚠️；越界档 0 个**。
@@ -221,14 +223,14 @@
 
 - 全表共 **83** 个不同的 `hits` 值；`hits` 相同的组 **14** 个；
 - 组内 `ep` 不一致的组：**0**（必须为 0）；
-- 最大组：`hits = 1`，共 **24** 条（`channel-extreme-shift`、`culture-bamboo-green`、`culture-discord-blurple`、`culture-facebook-blue`、`culture-instagram-pink`、`culture-klein-blue`、`culture-marrs-green`、`culture-prussian-blue`、`culture-rouge`、`culture-spotify-green`、`culture-tiffany-blue`、`culture-tiktok-pink`、`culture-titian-red`、`culture-van-gogh-blue`、`culture-whatsapp-green`、`culture-youtube-red`、`extreme-absolute-black`、`extreme-absolute-white`、`lucky-golden-tone`、`pure-dim-blue`、`pure-dim-green`、`pure-dim-red`、`pure-dim-yellow`、`pure-magenta-full`），它们的 `ep` 全部为 **1677721600**。
+- 最大组：`hits = 1`，共 **26** 条（`channel-extreme-shift`、`culture-bamboo-green`、`culture-discord-blurple`、`culture-facebook-blue`、`culture-instagram-pink`、`culture-klein-blue`、`culture-marrs-green`、`culture-miku-green`、`culture-prussian-blue`、`culture-rouge`、`culture-spotify-green`、`culture-teto-red`、`culture-tiffany-blue`、`culture-tiktok-pink`、`culture-titian-red`、`culture-van-gogh-blue`、`culture-whatsapp-green`、`culture-youtube-red`、`extreme-absolute-black`、`extreme-absolute-white`、`lucky-golden-tone`、`pure-dim-blue`、`pure-dim-green`、`pure-dim-red`、`pure-dim-yellow`、`pure-magenta-full`），它们的 `ep` 全部为 **1677721600**。
 
 > 说明：`ep = 100 * N / hits` 是 `hits` 的纯函数，同 `hits` 必然同 `ep`，
 > 此处是对生成数据的**数据侧复核**，不是公式重述。
 
 ### 5.2 单调性
 
-- 验证方式：对全部 7875 个无序对逐一检查「`hits` 较小 ⟺ `ep` 较大」；
+- 验证方式：对全部 8128 个无序对逐一检查「`hits` 较小 ⟺ `ep` 较大」；
 - 违反次数：**0**（必须为 0）；
 - 等价做法：`ep` 是 `hits` 的严格递减函数 `100N/hits`，因此 Spearman 秩相关恒为 **−1**。
 
@@ -252,7 +254,7 @@
 
 ### 5.6 可复现
 
-- `pricing.gen.ts` 本次 md5：`cc47e7a6b0ab7a83ba42f4a6a82d9dcc`；
+- `pricing.gen.ts` 本次 md5：`4ae09abd6a888e38a4778b9ed97bc769`；
 - 生成过程不含时间戳、随机数、`Set`/`Map` 迭代顺序依赖或浮点累加顺序差异；键序按 id 显式升序排序；
 
 - **复现证据（2026-10-03，连续两次完整枚举，脚本与徽章代码完全相同）**：
@@ -305,7 +307,7 @@
 
 ### 6.6 新 rarity 分布明显膨胀
 
-- `mythic` 4 → 31、`anomaly` 6 → 20、`rare` 28 → 23；
+- `mythic` 4 → 33、`anomaly` 6 → 20、`rare` 28 → 23；
 - 原因：十进制阈值（10⁵/10⁶/10⁷）恰好落在本表 `hits` 密集的 255–4096 区间上，是分布事实而非调参；
 - 若认为 `mythic` 太多：PRICING-SPEC §8 已明确配额失效，正确做法是改规则或接受，**不要动 ep 阈值**。需要你确认接受该分布。
 
@@ -320,8 +322,8 @@
 | 项目 | 值 |
 |---|---|
 | 生成命令 | `pnpm -C packages/shared run enumerate` |
-| pricing.gen.ts md5 | `cc47e7a6b0ab7a83ba42f4a6a82d9dcc` |
-| 第一趟耗时 | 134.17 s |
-| 第二趟耗时 | 137.55 s |
+| pricing.gen.ts md5 | `4ae09abd6a888e38a4778b9ed97bc769` |
+| 第一趟耗时 | 132.20 s |
+| 第二趟耗时 | 135.79 s |
 | 两次运行 `pricing.gen.ts` | md5 相同（`78781bff78aaea7a7b0d4a9421762e05`），逐字节相同 ✅ |
 | 两次运行本报告 | 仅「耗时」字段不同，其余逐字节相同 ⚠️ |
