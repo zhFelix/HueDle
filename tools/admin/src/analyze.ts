@@ -26,6 +26,19 @@ export interface AnalyzeContext {
 
 export const DEFAULT_CONTEXT: AnalyzeContext = { draws: 0, conclusive: false, topN: 10 };
 
+/**
+ * M4 的结论门槛：窗口内抽取数低于它就不给结论（小样本的 z 值无意义）。
+ *
+ * 这个常量是**唯一**的门槛来源——CLI、UI 与测试都必须走 {@link contextForDraws}，
+ * 这样"换了个界面就偷偷给结论"在类型层面就做不到。
+ */
+export const M4_MIN_DRAWS = 200;
+
+/** 由窗口内抽取数推导分析上下文（`conclusive` 只由 {@link M4_MIN_DRAWS} 决定）。 */
+export function contextForDraws(draws: number, topN = 10): AnalyzeContext {
+  return { draws, conclusive: draws >= M4_MIN_DRAWS, topN };
+}
+
 /** 非有限值 → `—`，其余按定点格式化。绝不输出 `NaN`。 */
 export function fmtNumber(value: unknown, digits = 2): string {
   const n = typeof value === 'number' ? value : Number(value);
@@ -136,7 +149,7 @@ export function analyzeM4(rows: BadgeHitRow[], ctx: AnalyzeContext): Table {
     table.rows = rows
       .slice(0, ctx.topN)
       .map(row => [row.badge_id, fmtInt(row.hit_days)]);
-    table.caption += `：窗口内仅 ${fmtInt(ctx.draws)} 次抽取（< 200），不给结论，只列原始计数`;
+    table.caption += `：窗口内仅 ${fmtInt(ctx.draws)} 次抽取（< ${M4_MIN_DRAWS}），不给结论，只列原始计数`;
     return table;
   }
 

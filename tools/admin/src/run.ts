@@ -21,6 +21,7 @@ import {
   analyzeM6,
   analyzeM7,
   analyzeM8,
+  contextForDraws,
   DEFAULT_CONTEXT,
   type BadgeHitRow,
   type CpRow,
@@ -36,10 +37,17 @@ import type { NameDetail, SectionResult, StatsReport } from './report';
 export interface RunStatsOptions {
   /** 回看窗口（天）。 */
   days: number;
-  /** 是否查询用户明细（仅终端显示）。 */
+  /** 是否查询用户明细（仅终端/本机页面显示）。 */
   includeNames: boolean;
   /** 注入"现在"，便于测试确定性。 */
   now?: Date;
+  /**
+   * M4 最多让分析层保留多少条（默认 10）。
+   *
+   * UI 会要一个更大的上限（见 `src/ui/server.ts`），再由展示层自行截断 + `<details>` 展开；
+   * CLI 保持默认值，行为不变。
+   */
+  topN?: number;
 }
 
 /** 把 `$n` 占位符映射成实际参数。 */
@@ -47,8 +55,13 @@ function buildParams(keys: ParamKey[], start: string, nowIso: string): unknown[]
   return keys.map(key => (key === 'start' ? start : nowIso));
 }
 
-/** 根据 metric.id 分派到对应的纯函数渲染器。 */
-function analyzeMetric(
+/**
+ * 根据 metric.id 分派到对应的纯函数渲染器。
+ *
+ * 导出是为了让 UI 层与测试能复用**同一条**"原始行 → 展示表格"的路径，
+ * 而不是在第二个界面里重新实现一遍 M1–M8（尤其是 M4 的样本门槛）。
+ */
+export function analyzeMetric(
   metric: MetricDef,
   rows: QueryResultRow[],
   extraRows: QueryResultRow[],
@@ -89,7 +102,7 @@ export async function runStats(pool: Pool, options: RunStatsOptions): Promise<St
   );
   const draws = totalsRows[0]?.draws ?? 0;
   const players = totalsRows[0]?.players ?? 0;
-  const ctx = { ...DEFAULT_CONTEXT, draws, conclusive: draws >= 200, topN: 10 };
+  const ctx = contextForDraws(draws, options.topN ?? DEFAULT_CONTEXT.topN);
 
   const sections: SectionResult[] = [];
   for (const metric of METRICS) {
