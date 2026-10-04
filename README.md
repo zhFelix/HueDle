@@ -2,18 +2,20 @@
 
 > 每天随机获得一种颜色，看看它藏着哪些稀有徽章。
 
-一个双模式的每日颜色收集游戏。前后端共用同一套颜色生成、徽章判定与计分逻辑，**只有种子来源和存储位置不同**。
+跟常见的每日猜谜不太一样：**你不需要猜，也没有操作空间。**颜色当天早就定好了，你能做的就是揭晓它，然后看它命中了什么。
+
+打开就能玩（记录存在这台设备上），也可以注册账号（记录跟着你走）。两套模式共用同一份算分逻辑，区别只在于「你是谁」。
 
 ---
 
 ## 玩法
 
-- 每天 00:00 UTC，每位玩家独立获得一种 24 位真彩色（共 16,777,216 种）。
-- 颜色由 `(身份, 日期)` 经 FNV-1a 哈希确定性地推导——**不是随机数**。
-- 点「开启今日颜色」揭晓，六个 HEX 字符像老虎机一样滚动，页面背景跟随变色。
-- 颜色会命中一堆规则，每条规则是一枚徽章；徽章按**实测概率**折算成 CP，汇总得到稀有度。
+- 每天 00:00 UTC 换一批颜色，每个人的都不一样（全色域共 1677 万种）。
+- 你的颜色是用 `(身份, 日期)` 算出来的，**不是随机数**——同一个身份，同一天永远是同一个颜色。
+- 点「开启今日颜色」揭晓：六个 HEX 字符像老虎机一样滚动，页面背景跟着变色。
+- 揭晓后，颜色会命中一堆规则。每条规则是一枚徽章，徽章折算成分数，加起来决定这次抽得算不算稀有。
 
-### 两条模式
+### 两种模式
 
 | | 本地模式 | 登录模式 |
 |---|---|---|
@@ -33,7 +35,7 @@
 
 ## 计分：概率定价
 
-每条徽章的 CP 不是手填的，而是由它的**实测概率**推出来的：
+每条徽章的分值不是手填的，是数出来的——**把 1677 万种颜色全跑一遍，看这条规则命中多少种**：
 
 ```
 N  = 2²⁴ = 16,777,216        # 颜色空间
@@ -41,7 +43,7 @@ p  = hits / N                # 该徽章命中多少种颜色（全色域精确�
 ep = 100 / p                 # 该徽章的 CP
 ```
 
-徽章稀有度是 `ep` 的十进制分档；**抽取稀有度是总分在全色域分布中的百分位**（神话恒为前 1%）。
+徽章的稀有度看 `ep` 落在哪个数量级；**你这次抽到的稀有度看总分在全部 1677 万种颜色里排第几**——「神话」永远是前 1%。
 
 这样做的好处是**同概率必然同分**——手填分值时做不到这点。实测过：`#000000` 与 `#002FA7` 的抽中概率完全相同（都是 `1/2²⁴`），手填模型却给出 2337 vs 876 CP，差两个档。
 
@@ -52,7 +54,7 @@ ep = 100 / p                 # 该徽章的 CP
 ## 仓库结构
 
 ```
-packages/shared/   前后端共享：类型、颜色转换、种子、76 条徽章、计分
+packages/shared/   前后端共享：类型、颜色转换、种子、126 条徽章、计分
 apps/web/          Vue 3 + Vite + Tailwind v4 + Pinia
 apps/api/          Hono + PostgreSQL
 docs/              设计文档与验证报告
@@ -77,44 +79,61 @@ pnpm -C apps/web dev            # 前端 :5173
 ```bash
 pnpm -r test                    # 全部
 pnpm -C packages/shared test    # 177 例，纯内存，秒级
-pnpm -C apps/web test           # 112 例，jsdom
-pnpm -C apps/api test           # 34 例，需要真实 Postgres
+pnpm -C apps/web test           # 173 例，jsdom
+pnpm -C apps/api test           # 60 例，需要真实 Postgres
 ```
 
-> `apps/api` 的测试连真实 Postgres，但跑在独立 schema `huedle_test` 里，**不会碰 `public`**。
->
-> 它还强制校验 `extra_float_digits=1`：Supabase 默认是 0，会让 `cp` 在存取之间丢精度
-> （`20521.809090190152` → `20521.8090901902`），那样「同概率同分」在最后几位就不成立。
-> 参数不生效时服务会**拒绝启动**，而不是悄悄降级。
+`apps/api` 的测试要连一个真的 Postgres。它建在自己的 schema `huedle_test` 里，
+**不会碰你的 `public` 表**；`DATABASE_URL` 没配就直接报错，不会静默跳过。
+
+> 它还会检查一个数据库参数（`extra_float_digits` 必须是 1）。Supabase 默认给 0，
+> 会让分数在存进去、读出来之间掉几位精度，那样「同概率同分」在最末几位就不成立了。
+> 参数不对时服务**拒绝启动**，而不是带着坏数据继续跑。详见下面的部署一节。
 
 ## 改了徽章规则之后必须重跑
 
-徽章的 CP 来自全色域枚举，所以改动任何 `check` 之后都要重新枚举，否则定价会和规则脱节：
+**判据只有一条：这次改动会不会影响「哪些颜色命中」或「命中算多少分」。**
+
+| 改了什么 | 枚举（约 4.5 分钟） | `docs`（0.2 秒） |
+|---|---|---|
+| `check`（判定逻辑） | **要** | 要 |
+| `group`（取代组） | **要**——它会影响总分分布，进而改变分位数阈值 | 要 |
+| `id` | **要**——定价按 id 索引 | 要 |
+| `name` / `description` / `family` | **不用**——它们不参与评分 | 要 |
+
+所以改个错别字、调个措辞，**只跑 `docs` 就够了**：
 
 ```bash
-pnpm -C packages/shared run enumerate      # 2²⁴ 全色域枚举，约 3 分钟，重写 src/pricing.gen.ts
+pnpm -C packages/shared run docs           # 重新生成 docs/BADGES.md（0.2 秒）
+pnpm -C packages/shared test               # 3 秒
+
+# 改了 check / group / id 时，才需要这三条：
+pnpm -C packages/shared run enumerate      # 2²⁴ 全色域枚举，约 4.5 分钟，重写 src/pricing.gen.ts
 pnpm -C packages/shared run supersession   # 取代审计：有没有徽章被 100% 取代（即永不单独计分）
-pnpm -C packages/shared run docs           # 重新生成 docs/BADGES.md
+pnpm -C packages/shared run docs
 ```
 
-`packages/shared` 里有一条一致性测试会在 `docs/BADGES.md` 过期时失败，提醒你跑 `run docs`。
+`docs/BADGES.md` 是**逐字节比对**的——描述改了却没重生成，测试就会红。
+它不会告诉你"哪句变了"，只会说文件不一致；这时跑一次 `run docs` 即可。
+
+加徽章的完整流程见 [docs/ADD-BADGE.md](docs/ADD-BADGE.md)。
 
 ---
 
 ## CI
 
-`.github/workflows/ci.yml` 在每次 push 与 PR 上跑全部 323 个测试：
+`.github/workflows/ci.yml` 在每次 push 与 PR 上跑全部 410 个测试：
 
 | Job | 内容 |
 |---|---|
 | `shared + web` | shared 177 例、web 类型检查 + 173 例 + 构建 |
-| `api` | api 类型检查 + 52 例，**自带一个 Postgres 17 service 容器** |
+| `api` | api 类型检查 + 60 例，**自带一个 Postgres 17 service 容器** |
 
 **不需要任何配置**，push 就会跑。它存在的意义不是"证明代码能跑"，而是让那些**一致性约束真的会被执行**：
 `docs/BADGES.md` 与代码是否同步、徽章定价与规则是否脱节、取代组是否合法、界面文案是否踩红线、
 登录模式是否污染了本地存储键。**没人跑的测试等于没有测试。**
 
-> 本地跑 `apps/api` 测试要 100 多秒（数据库在美东，每次查询跨洋 ~343ms）；
+> 本地跑 `apps/api` 测试要 100 多秒——数据库在悉尼，从国内每次查询要跨洋 ~350ms。
 > CI 里 Postgres 与 runner 同机，这一项会掉到几秒。
 
 ## 部署
@@ -143,9 +162,12 @@ pnpm -C packages/shared run docs           # 重新生成 docs/BADGES.md
 1. Railway → **New Project** → **Deploy from GitHub repo** → 选 `HueDle`
    （根目录有 `Dockerfile`，它会直接用它构建，不走自动检测）
 
-2. **把区域设成与 Supabase 同区**（通常是 `us-east`）
-   > 这一条比看起来重要：一次请求有 1–3 次数据库查询，但只有一跳浏览器→API。
-   > 让多跳的那一段走局域网，整体快一倍以上。
+2. **区域选 `asia-southeast1`（新加坡）**
+   > 一次请求要查 1–3 次数据库，但浏览器只跟 API 打一次交道。
+   > 把「多次查询」那一段放进离数据库近的地方，比让浏览器少跑几毫秒划算得多。
+   >
+   > 实测：北京 → 新加坡 118ms，北京 → 悉尼 **1368ms**（而 Supabase 项目在悉尼）。
+   > Railway 没有悉尼节点，新加坡是最近的那个。
 
 3. **Variables** 里设三个：
 
@@ -173,7 +195,7 @@ pnpm -C packages/shared run docs           # 重新生成 docs/BADGES.md
 
    然后手动重跑一次 `Deploy web to GitHub Pages`。
 
-#### ⚠️ 三个部署时才会暴露的坑
+#### ⚠️ 四个部署时才会暴露的坑
 
 **① `DATABASE_URL` 要用 Session pooler，不能用直连**
 
@@ -248,7 +270,7 @@ document.querySelector('script[src]').src
 | [docs/DESIGN.md](docs/DESIGN.md) | 主设计文档：双模式、计分、接口、数据库、本地存储 |
 | [docs/BADGE-SPEC.md](docs/BADGE-SPEC.md) | 徽章作者契约：类型、可用 API、反冗余、`group` 取代组 |
 | [docs/PRICING-SPEC.md](docs/PRICING-SPEC.md) | 概率定价：`ep = 100/p`、两套稀有度阶梯 |
-| [docs/BADGES.md](docs/BADGES.md) | 76 条徽章总表（**自动生成，勿手改**） |
+| [docs/BADGES.md](docs/BADGES.md) | 126 条徽章总表（**自动生成，勿手改**） |
 | [docs/research/](docs/research/) | RNGdle 机制研究、取代审计、定价迁移报告 |
 
 ## 开发约束
