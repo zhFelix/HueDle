@@ -13,8 +13,8 @@
  * | 条件 | 主展示 | 辅助句 |
  * |---|---|---|
  * | 恒真（hits ≥ total） | `100%` | `每一种颜色都符合` |
- * | q < 0.01 且 hits ≤ 9999 | `1 / {hits}` | `约 {人话的 total/hits} 分之 1` |
- * | 其余（q ≥ 0.01，或 hits ≥ 10000） | `{pct}%`（2 位有效数字） | `{N} 种颜色里有 {hits} 种` |
+ * | q < 0.01 且 hits ≤ 9999 | `1 / {total/hits}` | `约 {total/hits} 分之 1` |
+ * | 其余（q ≥ 0.01，或 hits ≥ 10000） | `{pct}%`（**固定 3 位小数**） | `{total} 种颜色里有 {hits} 种` |
  *
  * 中文大数换算（§7.2）**不引 `Intl.NumberFormat(notation:'compact')`**：
  * 不同运行时的中文紧凑格式舍入不一致，而这里是会被测试断言的字符串，手写换算表是确定的。
@@ -29,10 +29,9 @@ const GROUPED = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 /** 大数的人话写法：16777216 → `1677.7 万`；999 → `999`。 */
 export function formatCount(n: number): string {
   if (!Number.isFinite(n)) return '0';
-  const abs = Math.abs(n);
-  if (abs >= 1e8) return `${(n / 1e8).toFixed(1)} 亿`;
-  if (abs >= 1e4) return `${(n / 1e4).toFixed(1)} 万`;
-  if (abs >= 1e3) return `${(n / 1e3).toFixed(1)} 千`;
+  // **不缩略**：写实数（`16,777,216`），不用「1677 万」。
+  // 缩略会丢掉读者判断量级所需的精度——「1677 万」既可能是 16,770,000
+  // 也可能是 16,779,999，而这里要表达的恰恰是「正好多少种颜色」。
   return GROUPED.format(Math.round(n));
 }
 
@@ -44,8 +43,8 @@ export function formatCount(n: number): string {
  * `1677 万种颜色里有 256 种` 的写法。
  */
 function measure(count: number, unit: string): string {
-  const text = formatCount(count);
-  return /[亿万千]$/.test(text) ? `${text}${unit}` : `${text} ${unit}`;
+  // formatCount 现在恒定返回带千位分隔的纯数字，所以一律加空格即可。
+  return `${formatCount(count)} ${unit}`;
 }
 
 /**
@@ -54,10 +53,17 @@ function measure(count: number, unit: string): string {
  * 直接用 `toPrecision(2)` 会在数值 ≥ 100（如 99.99 → `1.0e+2`）时切到科学计数法，
  * 那不是一个能给玩家看的百分比；这里对科学计数法兜底成整数。
  */
+/**
+ * 百分比，**固定 3 位小数**。
+ *
+ * 走百分比这条路的最小值是 `hits = 10000`（q ≈ 0.06%），所以 3 位小数不会退化成 `0.000%`；
+ * 更小的命中数都走 `1 / N` 的分数形式。
+ *
+ * 用 `toFixed` 而非 `toPrecision(2)`：后者按**有效数字**舍入，读者没法直接比大小——
+ * `13%` 和 `0.60%` 都是「2 位有效数字」，但一个看着像整数、一个看着像千分位。
+ */
 function formatPercent(q: number): string {
-  const pct = q * 100;
-  const text = pct.toPrecision(2);
-  return text.includes('e') ? String(Math.round(pct)) : text;
+  return (q * 100).toFixed(3);
 }
 
 /** 概率的主展示：`1 / 255`、`13%`、`0.060%`、`100%`、`0%`。 */

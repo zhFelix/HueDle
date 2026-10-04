@@ -28,12 +28,12 @@ const SAMPLE_HITS = [
 ] as const;
 
 describe('formatCount — 中文大数', () => {
-  it('按量级换算成人话（亿 / 万 / 千 / 原数字）', () => {
-    expect(formatCount(16_777_216)).toBe('1677.7 万');
-    expect(formatCount(2_097_152)).toBe('209.7 万');
-    expect(formatCount(11_011_456)).toBe('1101.1 万');
-    expect(formatCount(100_000_000)).toBe('1.0 亿');
-    expect(formatCount(4096)).toBe('4.1 千');
+  it('写实数、带千位分隔，不做中文大数缩略', () => {
+    expect(formatCount(16_777_216)).toBe('16,777,216');
+    expect(formatCount(2_097_152)).toBe('2,097,152');
+    expect(formatCount(11_011_456)).toBe('11,011,456');
+    expect(formatCount(100_000_000)).toBe('100,000,000');
+    expect(formatCount(4096)).toBe('4,096');
     expect(formatCount(999)).toBe('999');
     expect(formatCount(0)).toBe('0');
   });
@@ -55,21 +55,21 @@ describe('formatProbability — 主展示', () => {
     expect(formatProbability(TOTAL_COLORS + 1)).toBe('100%');
   });
 
-  it('中间值：少量命中走分数，大量命中走百分比', () => {
+  it('中间值：少量命中走分数，大量命中走百分比（3 位小数）', () => {
     // 千分之一数 = 16,777,216 ÷ hits（不是 hits 本身）
     expect(formatProbability(255)).toBe('1 / 65,793');
     expect(formatProbability(4096)).toBe('1 / 4,096');
     expect(formatProbability(9_999)).toBe('1 / 1,678');
     // 10_000 是「hits ≤ 9999 走分数」的边界外侧 → 百分比。
     expect(formatProbability(10_000)).toBe('0.060%');
-    expect(formatProbability(100_000)).toBe('0.60%');
-    expect(formatProbability(2_097_152)).toBe('13%');
-    expect(formatProbability(11_011_456)).toBe('66%');
+    expect(formatProbability(100_000)).toBe('0.596%');
+    expect(formatProbability(2_097_152)).toBe('12.500%');
+    expect(formatProbability(11_011_456)).toBe('65.633%');
   });
 
-  it('total 可注入：小数色域下同样是 2 位有效数字的百分比', () => {
-    expect(formatProbability(128, 256)).toBe('50%');
-    expect(formatProbability(100, 256)).toBe('39%');
+  it('total 可注入：小数色域下同样是 3 位小数的百分比', () => {
+    expect(formatProbability(128, 256)).toBe('50.000%');
+    expect(formatProbability(100, 256)).toBe('39.063%');
     expect(formatProbability(256, 256)).toBe('100%');
   });
 
@@ -96,17 +96,17 @@ describe('formatProbabilityHint — 辅助句', () => {
     expect(formatProbabilityHint(TOTAL_COLORS)).toBe('每一种颜色都符合');
   });
 
-  it('少量命中：约 N 分之 1（N 是人话大数）', () => {
-    expect(formatProbabilityHint(255)).toBe('约 6.6 万分之 1');
-    expect(formatProbabilityHint(720)).toBe('约 2.3 万分之 1');
-    expect(formatProbabilityHint(4096)).toBe('约 4.1 千分之 1');
-    expect(formatProbabilityHint(16)).toBe('约 104.9 万分之 1');
+  it('少量命中：约 N 分之 1（N 是实数）', () => {
+    expect(formatProbabilityHint(255)).toBe('约 65,793 分之 1');
+    expect(formatProbabilityHint(720)).toBe('约 23,302 分之 1');
+    expect(formatProbabilityHint(4096)).toBe('约 4,096 分之 1');
+    expect(formatProbabilityHint(16)).toBe('约 1,048,576 分之 1');
   });
 
   it('大量命中：N 种颜色里有 M 种', () => {
-    expect(formatProbabilityHint(256, 25_600)).toBe('2.6 万种颜色里有 256 种');
-    expect(formatProbabilityHint(200_000)).toBe('1677.7 万种颜色里有 20.0 万种');
-    expect(formatProbabilityHint(2_097_152)).toBe('1677.7 万种颜色里有 209.7 万种');
+    expect(formatProbabilityHint(256, 25_600)).toBe('25,600 种颜色里有 256 种');
+    expect(formatProbabilityHint(200_000)).toBe('16,777,216 种颜色里有 200,000 种');
+    expect(formatProbabilityHint(2_097_152)).toBe('16,777,216 种颜色里有 2,097,152 种');
   });
 
   it('不出现 NaN / Infinity，且退化输入不抛', () => {
