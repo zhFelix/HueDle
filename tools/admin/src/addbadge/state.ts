@@ -69,8 +69,15 @@ export interface PipelineStatus {
   failureClass?: string;
   /** 面向人的结论（成功 / 已回滚 / 需人工处理）。 */
   conclusion: string;
+  /** 单条时是它自己；批量时是整批摘要（`batch-N`）。 */
   spec: StatusSpec;
+  /** 批量模式：本批提交的徽章条数（单条时不写，保持旧状态的形状）。 */
+  specCount?: number;
+  /** 批量模式：每条徽章的元数据（用于 UI/CLI 展示整批）。 */
+  specs?: StatusSpec[];
   hits?: number;
+  /** 批量模式：每条新徽章的干跑 hits。 */
+  hitsBySpec?: Array<{ id: string; hits: number }>;
   snapshotPath?: string;
   logPath: string;
   evidence: string[];
@@ -112,6 +119,8 @@ export interface LockInfo {
   pid: number;
   startedAt: string;
   spec: StatusSpec;
+  /** 批量模式的条数（单条时不写）。 */
+  specCount?: number;
   logPath: string;
   snapshotPath?: string;
 }

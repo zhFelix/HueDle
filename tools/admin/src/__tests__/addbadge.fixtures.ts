@@ -41,6 +41,38 @@ export const grayBadges: BadgeDef[] = [
 ];
 `;
 
+/** 第二条家族文件：批量「跨文件」用例需要 N 条落在不同家族文件里。 */
+export const FAKE_MATH_TS = `// family: math — 数字性质
+import type { BadgeDef } from '../types';
+import { isPrime } from './helpers';
+
+export const mathBadges: BadgeDef[] = [
+  {
+    id: 'math-prime-sum',
+    name: '质数和',
+    description: 'R + G + B 是质数',
+    family: 'math',
+    check: c => isPrime(c.r + c.g + c.b),
+  },
+];
+`;
+
+/** 第三条家族文件。 */
+export const FAKE_PURE_TS = `// family: pure — 纯色
+import type { BadgeDef } from '../types';
+import { isGray } from './helpers';
+
+export const pureBadges: BadgeDef[] = [
+  {
+    id: 'pure-grayish',
+    name: '近灰',
+    description: 'R = G = B',
+    family: 'pure',
+    check: c => isGray(c),
+  },
+];
+`;
+
 export function git(cwd: string, args: string[]): void {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
   if (result.status !== 0) {
@@ -55,6 +87,8 @@ export function createFakeRepo(): FakeRepo {
     'pnpm-workspace.yaml': "packages:\n  - 'apps/*'\n  - 'packages/*'\n  - 'tools/*'\n",
     'tools/admin/out/.gitignore': '*\n!.gitignore\n',
     'packages/shared/src/badges/gray.ts': FAKE_GRAY_TS,
+    'packages/shared/src/badges/math.ts': FAKE_MATH_TS,
+    'packages/shared/src/badges/pure.ts': FAKE_PURE_TS,
     'packages/shared/src/pricing.gen.ts': "export const PRICING = {};\n",
     'docs/BADGES.md': '# 徽章总表（初始）\n',
     'docs/research/PRICING-CURRENT.md': '# 定价快照（初始）\n',

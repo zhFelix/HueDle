@@ -1,8 +1,12 @@
 /**
  * `add-badge` / `rollback` 两个子命令的编排（CLI 侧）。
  *
- * CLI 与 UI 走**同一条提交路径**（`submitBadgeJob`）：都只是抢锁 + 拉起 detached 子进程，
- * 然后**只读状态文件**观察进度。CLI 默认等着（`--no-wait` 可改成提交即返回）。
+ * CLI 与 UI 走**同一条提交路径**（`submitBadgeJob` / `submitBadgeBatchJob`）：
+ * 都只是抢锁 + 拉起 detached 子进程，然后**只读状态文件**观察进度。
+ * CLI 默认等着（`--no-wait` 可改成提交即返回）。
+ *
+ * 批量：`--spec badges.json` 的内容是**数组**时就是批量提交（N 条 = 一个事务，
+ * 整批只跑一次枚举）。单条仍是对象形态，旧的 spec 文件不改也能继续用。
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,7 +16,7 @@ import { EXIT_OK, EXIT_ROLLBACK_FAILED } from './pipeline';
 import { restoreSnapshot, verifyRestored, type Snapshot } from './rollback';
 import { SpecError, parseBadgeSpec, type BadgeSpec } from './spec';
 import { addBadgePaths, ensureOutDirs, readStatus } from './state';
-import { makeRunId, submitBadgeJob } from './submit';
+import { makeBatchRunId, makeRunId, submitBadgeBatchJob, submitBadgeJob } from './submit';
 import { waitForCompletion } from './watch';
 
 export interface CommandDeps {
@@ -34,10 +38,9 @@ function err(deps: CommandDeps, line: string): void {
 }
 
 /** 原始 spec + 归一化结果（作业文件里存原始 JSON，见 `submit.ts` 的说明）。 */
-export interface BuiltSpec {
-  raw: unknown;
-  spec: BadgeSpec;
-}
+export type BuiltSpec =
+  | { kind: 'single'; raw: unknown; spec: BadgeSpec }
+  | { kind: 'batch'; rawSpecs: unknown[]; specs: BadgeSpec[] };
 
 /** 从 CLI 参数组装 spec（与 UI 表单走同一份 `parseBadgeSpec`，两条入口不会漂移）。 */
 export function buildSpecFromArgs(args: AddBadgeCommand): BuiltSpec {
@@ -50,7 +53,13 @@ export function buildSpecFromArgs(args: AddBadgeCommand): BuiltSpec {
     } catch (parseError) {
       throw new UsageError(`--spec 不是合法 JSON：${parseError instanceof Error ? parseError.message : parseError}`);
     }
-    return { raw, spec: parseBadgeSpec(raw) };
+    // 数组 = 批量（一个事务）；对象 = 单条（旧行为，逐字节不变）。
+    if (Array.isArray(raw)) {
+      if (raw.length === 0) throw new UsageError('--spec 的 JSON 数组是空的：批量至少要有一条徽章');
+      const specs = raw.map((item, index) => parseBadgeSpec(item, `specs[${index}]`));
+      return { kind: 'batch', rawSpecs: raw, specs };
+    }
+    return { kind: 'single', raw, spec: parseBadgeSpec(raw) };
   }
   if (args.ts) {
     const missing = (['id', 'name', 'description', 'family'] as const).filter(key => args[key] === undefined);
@@ -58,10 +67,10 @@ export function buildSpecFromArgs(args: AddBadgeCommand): BuiltSpec {
       throw new UsageError(`--ts 需要同时给出：${missing.map(key => `--${key}`).join('、')}`);
     }
     const evalHelpers: Record<string, string> = {};
-    for (const raw of args.helperEvals) {
-      const index = raw.indexOf('=');
-      if (index <= 0) throw new UsageError(`--helper-eval 的格式是 name=<js 源码>，收到：${raw}`);
-      evalHelpers[raw.slice(0, index).trim()] = raw.slice(index + 1).trim();
+    for (const rawHelper of args.helperEvals) {
+      const index = rawHelper.indexOf('=');
+      if (index <= 0) throw new UsageError(`--helper-eval 的格式是 name=<js 源码>，收到：${rawHelper}`);
+      evalHelpers[rawHelper.slice(0, index).trim()] = rawHelper.slice(index + 1).trim();
     }
     const raw = {
       id: args.id,
@@ -74,7 +83,7 @@ export function buildSpecFromArgs(args: AddBadgeCommand): BuiltSpec {
         ...(Object.keys(evalHelpers).length > 0 ? { evalHelpers } : {}),
       },
     };
-    return { raw, spec: parseBadgeSpec(raw) };
+    return { kind: 'single', raw, spec: parseBadgeSpec(raw) };
   }
   throw new UsageError('add-badge 需要 --spec <file.json> 或 --ts <表达式>（--status 只看状态）');
 }
@@ -86,8 +95,15 @@ function printStatus(deps: CommandDeps): number {
     out(deps, `runId      : ${status.runId}`);
     out(deps, `状态       : ${status.state}（阶段 ${status.phase} ${status.phaseIndex + 1}/${status.phaseCount}）`);
     out(deps, `徽章       : ${status.spec.id}（${status.spec.family}）`);
+    if (status.specCount !== undefined && status.specCount > 1 && status.specs) {
+      out(deps, `批量       : ${status.specCount} 条`);
+      for (const item of status.specs) out(deps, `  - ${item.id}（${item.family}）`);
+    }
     out(deps, `开始/更新  : ${status.startedAt} / ${status.updatedAt}`);
     if (status.hits !== undefined) out(deps, `干跑 hits  : ${status.hits}`);
+    if (status.hitsBySpec) {
+      for (const item of status.hitsBySpec) out(deps, `  ${item.id}: ${item.hits}`);
+    }
     if (status.failureClass) out(deps, `失败分类   : ${status.failureClass}`);
     if (status.snapshotPath) out(deps, `快照       : ${status.snapshotPath}`);
     out(deps, `日志       : ${status.logPath}`);
@@ -117,34 +133,47 @@ export async function runAddBadgeCommand(args: AddBadgeCommand, deps: CommandDep
     return parseError instanceof SpecError ? 2 : 2;
   }
 
-  const { raw, spec } = built;
   const now = deps.now?.() ?? new Date();
-  const runId = makeRunId(spec, now);
   const paths = ensureOutDirs(deps.adminRoot);
+  const isBatch = built.kind === 'batch';
+  const batchCount = built.kind === 'batch' ? built.specs.length : 0;
+  const runId = built.kind === 'batch' ? makeBatchRunId(built.specs, now) : makeRunId(built.spec, now);
   const logPath = join(paths.logsDir, `${runId}.log`);
 
-  const submitted = submitBadgeJob({
-    rawSpec: raw,
-    spec,
-    root: deps.root,
-    adminRoot: deps.adminRoot,
-    runId,
-    logPath,
-    force: args.force,
-  });
+  const submitted = built.kind === 'batch'
+    ? submitBadgeBatchJob({
+        rawSpecs: built.rawSpecs,
+        specs: built.specs,
+        root: deps.root,
+        adminRoot: deps.adminRoot,
+        runId,
+        logPath,
+        force: args.force,
+      })
+    : submitBadgeJob({
+        rawSpec: built.raw,
+        spec: built.spec,
+        root: deps.root,
+        adminRoot: deps.adminRoot,
+        runId,
+        logPath,
+        force: args.force,
+      });
   if (!submitted.ok) {
     err(deps, submitted.reason);
     return submitted.exitCode;
   }
 
-  out(deps, `已提交：runId=${submitted.runId}（子进程 pid ${submitted.pid ?? '?'}）`);
+  out(deps, `已提交${isBatch ? `（批量 ${batchCount} 条，整批一个事务）` : ''}：runId=${submitted.runId}（子进程 pid ${submitted.pid ?? '?'}）`);
   out(deps, `日志：${submitted.logPath}`);
   out(deps, `状态：${addBadgePaths(deps.adminRoot).statusFile}`);
   out(deps, '管道跑在 detached 子进程里：这个终端断开也不会影响它。');
 
   if (!args.wait) return EXIT_OK;
 
-  out(deps, '等待管道结束（约 10–15 分钟；--no-wait 可立即返回）…');
+  out(deps, isBatch
+    ? `等待管道结束（整批只跑一次枚举，约 10–15 分钟；--no-wait 可立即返回）…`
+    : '等待管道结束（约 10–15 分钟；--no-wait 可立即返回）…');
   const view = await waitForCompletion(deps.adminRoot, submitted.runId, {
     onPhase: current => {
       if (current.status) out(deps, `  [${current.status.phaseIndex + 1}/${current.status.phaseCount}] ${current.status.phase}`);

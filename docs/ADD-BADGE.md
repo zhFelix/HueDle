@@ -32,6 +32,42 @@ pnpm -C packages/shared run docs
 pnpm -C packages/shared test
 ```
 
+> 加多条时不要逐条重复上面 4 步（N 条 ≈ N×10 分钟）——见下面的「批量」。
+
+---
+
+## 批量：一次加 N 条（只跑一次枚举）
+
+把要加的若干条 spec 写成一个 **JSON 数组**，交给同一条流水线：
+
+```bash
+# badges.json 的内容是数组，即批量提交
+pnpm -C tools/admin run add-badge -- --spec badges.json
+```
+
+```json
+[
+  { "id": "gray-mid-echo", "name": "中间回声", "description": "R = G = B 且该值在 100–155", "family": "gray",
+    "when": { "between": [{ "field": "r" }, 100, 155] } },
+  { "id": "math-prime-sum", "name": "质数和", "description": "R + G + B 是质数", "family": "math",
+    "when": { "isPrime": { "add": [{ "field": "r" }, { "field": "g" }, { "field": "b" }] } } }
+]
+```
+
+要点（与逐条完全一致的规则，只是合到一次）：
+
+- **一个事务，全有或全无**：N 条要么全部落地并跑完流水线，要么整批回滚；
+  不存在「3 条成功、2 条失败」这种半截状态。
+- **只跑一次枚举**：`enumerate` → md5 幂等复跑 → `docs` → `supersession` → `test`
+  对整批各只执行一次，不随 N 增长（N 条 ≈ 10 分钟，而不是 N×10 分钟）。
+- **N 条可跨家族文件**：快照/回滚覆盖全部受影响文件，回滚后所有文件逐字节（md5）复原
+  且 `git diff --exit-code` 干净。
+- **写盘前仍要 2²⁴ 干跑**，且批量额外做 **新 vs 新** 的必然蕴含检查：
+  新增的徽章彼此之间若构成包含关系（A 命中 ⇒ B 命中）且不在同一个 `group`，
+  会同时命中、双倍计分，直接被拦下（零写盘）——同组豁免与单条口径一致。
+- 其余安全性质不变：脏工作区拒绝开跑（exit 7）、并发拒绝（exit 6）、
+  stale 锁检出（exit 8）、全局平衡类失败保留现场（exit 3）。
+
 ---
 
 ## 三条铁律

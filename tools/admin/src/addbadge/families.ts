@@ -25,6 +25,22 @@ export function affectedPaths(family: Family): string[] {
   ];
 }
 
+/**
+ * 多条徽章（批量）的**全部**受影响路径：逐个家族的 {@link affectedPaths} 取并集。
+ *
+ * 批量时 N 条可能落在不同家族文件里，快照与回滚必须覆盖全部受影响文件。
+ * 对单一家族调用时返回值与 {@link affectedPaths} 完全一致（顺序也一致）。
+ */
+export function affectedPathsFor(families: readonly Family[]): string[] {
+  const out: string[] = [];
+  for (const family of families) {
+    for (const path of affectedPaths(family)) {
+      if (!out.includes(path)) out.push(path);
+    }
+  }
+  return out;
+}
+
 export function familyFilePath(root: string, family: Family): string {
   return join(root, BADGES_DIR, `${family}.ts`);
 }

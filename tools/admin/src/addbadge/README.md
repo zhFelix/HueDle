@@ -27,8 +27,8 @@ UI / CLI（只读状态文件）  ──提交──▶  子进程（detached，
 | `compile.ts` | 两条路径合流 + 写盘前的静态检查（import / private helper） |
 | `families.ts` | 家族文件与 id/name 清单的只读读取（字符串级，不解析 TS） |
 | `insert.ts` | 末尾纯插入 + 缩进模板 + 三自检 |
-| `dryrun.ts` | 2²⁴ 干跑 + 蕴含/Jaccard 冗余检测 |
-| `pipeline.ts` | 阶段编排、失败分类、退出码 |
+| `dryrun.ts` | 2²⁴ 干跑 + 蕴含/Jaccard 冗余检测（`runDryRun` 单条；`runBatchDryRun` 批量：一次扫描 + **新 vs 新** N×N） |
+| `pipeline.ts` | 阶段编排、失败分类、退出码（`runPipeline` 单条；`runBatchPipeline` 批量，共用同一核心） |
 | `rollback.ts` | 快照与还原（git 快路径 + 复制兜底 + 证明回到绿） |
 | `state.ts` | 状态文件 + 锁（原子写、O_EXCL、stale 检测） |
 | `submit.ts` | 抢锁 → 写作业文件 → 拉起 detached 子进程 |
@@ -50,6 +50,10 @@ UI / CLI（只读状态文件）  ──提交──▶  子进程（detached，
 # 结构化 spec（when：JSON 表达式，词汇表 = helpers.ts + ColorInfo 字段 + 运算符）
 pnpm -C tools/admin run add-badge -- --spec new-badge.json
 
+# 批量：--spec 文件内容是**数组**。N 条一起提交 = 一个事务（全有或全无），
+# 干跑/枚举/docs/supersession/test 对整批各只跑一次（N 条 ≈ 10 分钟，不是 N×10）。
+pnpm -C tools/admin run add-badge -- --spec badges.json
+
 # 手写路径（一等公民）：单表达式，可引用目标家族文件里**已经存在**的 private helper
 pnpm -C tools/admin run add-badge -- --ts "onRanks(c, counts => counts.filter(n => n >= 5).length === 1)" \
   --id casino-e2e-straight --name 测试顺子 --description '恰好一种点数出现 5 次及以上' --family casino \
@@ -58,6 +62,17 @@ pnpm -C tools/admin run add-badge -- --ts "onRanks(c, counts => counts.filter(n 
 pnpm -C tools/admin run add-badge -- --status          # 只看状态，不提交
 pnpm -C tools/admin run rollback  -- --snapshot <dir>  # 按快照手动回滚
 ```
+
+## 批量的语义
+
+- **一个事务**：N 条要么全部落地并跑完流水线，要么整批回滚；不产生「3 成功 2 失败」的半截状态。
+- **只跑一次枚举**：`enumerate`（+ md5 幂等复跑）、`docs`、`supersession`、`test` 对整批各一次，与 N 无关。
+- **跨文件**：N 条可落在不同家族文件；快照/回滚用 `affectedPathsFor(families)` 的并集，回滚后逐字节复原。
+- **新 vs 新**：批量干跑在**一次扫描**里同时做「新 vs 既有」与「新 vs 新」的必然蕴含检查
+  （同组豁免与单条一致）。两条互相蕴含的新徽章会同时命中、双倍计分，必须合并/改宽窄或用同一个 `group`。
+- **supersession**：任意一条新徽章被 100% 取代 → **整批回滚**。
+- 安全性质不变：脏工作区 exit 7、并发 exit 6、stale 锁 exit 8、全局平衡类失败保留现场 exit 3。
+- 批量仍是 detached 子进程：状态文件里多写 `specCount` / `specs` / `hitsBySpec`，UI 仍只读轮询。
 
 ## 两条路径的地位
 

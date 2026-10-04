@@ -12,16 +12,38 @@
  *     退出码 **3**。理由：自动回滚会**掩盖真实信号**，那是有信息量的失败；
  *   - 回滚本身失败 → 退出码 **4**，绝不静默。
  *
+ * **批量模式**（`runBatchPipeline`）：一次提交 N 条 spec，是**一个事务**——
+ * 要么全部落地并跑完流水线，要么整批回滚（不允许「3 条成功、2 条失败」留在仓库里）。
+ * 性能目标是「**枚举只跑一次**」：`enumerate` 与后续 `docs` / `supersession` / `test`
+ * 对整批只执行一次，不随 N 线性增长。单条路径（`runPipeline`）走同一个核心，
+ * 行为与批量引入前逐字节一致。
+ *
  * 这个模块是**纯编排**：所有外部动作（跑命令、干跑、读既有徽章）都从 `deps` 注入，
- * 因此可以在临时仓库里用假命令完整单测 12 个失败分支。
+ * 因此可以在临时仓库里用假命令完整单测失败分支。
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import type { ColorInfo } from '@huedle/shared';
 import { compileSpec } from './compile';
-import { loadExistingChecks, runDryRun, type DryRunOptions, type DryRunResult, type ExistingCheck } from './dryrun';
-import { affectedPaths, findArrayAnchor, lastElementIndent, readFamilyFile, assertIdUnique, assertNameUniqueInFamily } from './families';
+import {
+  loadExistingChecks,
+  runBatchDryRun,
+  runDryRun,
+  type BatchDryRunOptions,
+  type BatchDryRunResult,
+  type DryRunOptions,
+  type DryRunResult,
+  type ExistingCheck,
+} from './dryrun';
+import {
+  affectedPathsFor,
+  findArrayAnchor,
+  lastElementIndent,
+  readFamilyFile,
+  assertIdUnique,
+  assertNameUniqueInFamily,
+} from './families';
 import { assertSelfCheck, planInsertion } from './insert';
 import { captureSnapshot, dirtyPaths, dropSnapshot, restoreSnapshot, verifyRestored, type Snapshot } from './rollback';
 import { SpecError, isHandwritten, type BadgeSpec } from './spec';
@@ -86,8 +108,10 @@ export interface PipelineDeps {
   adminRoot: string;
   now: () => Date;
   exec: (command: string, options?: { timeoutMs?: number }) => ExecResult;
-  /** 干跑（测试注入小色域）。 */
+  /** 干跑（单条；测试注入小色域）。 */
   dryRun?: (options: DryRunOptions) => DryRunResult;
+  /** 批量干跑（一次扫描 N 条 + 新 vs 新检查；测试可注入）。 */
+  dryRunBatch?: (options: BatchDryRunOptions) => BatchDryRunResult;
   /** 既有徽章（测试注入假集合）。 */
   existingChecks?: () => ExistingCheck[];
   /** 干跑色域大小，默认 2²⁴；测试用小值。 */
@@ -104,6 +128,14 @@ export interface PipelineJob {
   logPath: string;
 }
 
+/** 批量作业：一次提交 N 条 spec，整批是一个事务。 */
+export interface BatchPipelineJob {
+  runId: string;
+  /** ≥1 条；长度 1 时行为与 {@link PipelineJob} 完全一致。 */
+  specs: BadgeSpec[];
+  logPath: string;
+}
+
 export interface PipelineOutcome {
   exitCode: number;
   state: PipelineState;
@@ -112,6 +144,8 @@ export interface PipelineOutcome {
   evidence: string[];
   snapshotPath?: string;
   hits?: number;
+  /** 批量模式：每条新徽章的干跑 hits。 */
+  hitsBySpec?: Array<{ id: string; hits: number }>;
 }
 
 /** 内部：一个已分类的阶段失败。 */
@@ -183,17 +217,72 @@ export function md5OfFile(path: string): string {
   return createHash('md5').update(readFileSync(path)).digest('hex');
 }
 
+// ───────────────────────────── 批量辅助 ─────────────────────────────
+
+/** 一个 spec → 状态文件里的元数据。 */
+function specMeta(spec: BadgeSpec): StatusSpec {
+  return { id: spec.id, name: spec.name, family: spec.family, group: spec.group ?? null };
+}
+
+/** 整批在锁/状态文件里的摘要（单条时就是它自己）。 */
+export function summarizeSpecs(specs: readonly BadgeSpec[]): StatusSpec {
+  if (specs.length === 1) return specMeta(specs[0]!);
+  const families = [...new Set(specs.map(spec => spec.family))];
+  return { id: `batch-${specs.length}`, name: `${specs.length} 条徽章`, family: families.join('+'), group: null };
+}
+
+/** 批量内部的 id / name 唯一性（既有文件之外，新徽章彼此也不能撞）。 */
+export function assertBatchInternalUnique(specs: readonly BadgeSpec[]): void {
+  const ids = new Set<string>();
+  const names = new Set<string>();
+  for (const spec of specs) {
+    if (ids.has(spec.id)) throw new SpecError(`批量提交里 id "${spec.id}" 重复出现`, 'id');
+    ids.add(spec.id);
+    const key = `${spec.family}\u0000${spec.name}`;
+    if (names.has(key)) {
+      throw new SpecError(`批量提交里 family "${spec.family}" 的 name "${spec.name}" 重复出现`, 'name');
+    }
+    names.add(key);
+  }
+}
+
 // ───────────────────────────── 主流程 ─────────────────────────────
 
+/** 单条路径（既有行为，调用方与测试都只用它）。 */
 export function runPipeline(job: PipelineJob, deps: PipelineDeps): PipelineOutcome {
+  return runPipelineCore(job.runId, [job.spec], job.logPath, deps);
+}
+
+/**
+ * 批量路径：一次提交 N 条 spec，**整批一个事务**（全有或全无）。
+ *
+ * 与单条共用同一个核心，因此阶段顺序、失败分类、退出码、锁、快照与回滚语义完全一致；
+ * 差别只在：干跑一次扫描整批并做新 vs 新检查、按 spec 逐条写盘、`supersession`
+ * 检查**任意一条**新徽章被 100% 取代 → 整批回滚。
+ */
+export function runBatchPipeline(job: BatchPipelineJob, deps: PipelineDeps): PipelineOutcome {
+  if (job.specs.length === 0) {
+    throw new SpecError('批量加徽章至少要有一条 spec', 'specs');
+  }
+  return runPipelineCore(job.runId, job.specs, job.logPath, deps);
+}
+
+function runPipelineCore(
+  runId: string,
+  specs: BadgeSpec[],
+  logPath: string,
+  deps: PipelineDeps,
+): PipelineOutcome {
   const commands = deps.commands ?? DEFAULT_COMMANDS;
-  const specMeta: StatusSpec = {
-    id: job.spec.id,
-    name: job.spec.name,
-    family: job.spec.family,
-    group: job.spec.group ?? null,
-  };
-  const status = makeStatus({ runId: job.runId, spec: specMeta, logPath: job.logPath, pid: process.pid });
+  const isBatch = specs.length > 1;
+  const spec = specs[0]!;
+  const families = [...new Set(specs.map(item => item.family))];
+  const specMetas = specs.map(specMeta);
+  const status = makeStatus({ runId, spec: summarizeSpecs(specs), logPath, pid: process.pid });
+  if (isBatch) {
+    status.specCount = specs.length;
+    status.specs = specMetas;
+  }
   const evidence: string[] = [];
   const publish = (): void => {
     status.updatedAt = deps.now().toISOString();
@@ -208,7 +297,7 @@ export function runPipeline(job: PipelineJob, deps: PipelineDeps): PipelineOutco
   };
   publish();
 
-  const paths = affectedPaths(job.spec.family);
+  const paths = affectedPathsFor(families);
   const snapshotsDir = addBadgePaths(deps.adminRoot).snapshotsDir;
   let snapshot: Snapshot | null = null;
   let wrote = false;
@@ -236,6 +325,7 @@ export function runPipeline(job: PipelineJob, deps: PipelineDeps): PipelineOutco
       evidence,
       ...(extra?.snapshotPath ? { snapshotPath: extra.snapshotPath } : {}),
       ...(status.hits !== undefined ? { hits: status.hits } : {}),
+      ...(status.hitsBySpec ? { hitsBySpec: status.hitsBySpec } : {}),
     };
   };
 
@@ -292,8 +382,11 @@ export function runPipeline(job: PipelineJob, deps: PipelineDeps): PipelineOutco
   try {
     // ── 阶段 0：准备 + 前置拒绝 ────────────────────────────────────
     setPhase('prepare');
-    assertIdUnique(deps.root, job.spec.id);
-    assertNameUniqueInFamily(deps.root, job.spec.family, job.spec.name);
+    for (const item of specs) {
+      assertIdUnique(deps.root, item.id);
+      assertNameUniqueInFamily(deps.root, item.family, item.name);
+    }
+    // 受影响路径（跨家族取并集）有未提交改动 → 拒绝开跑，不覆盖别人的工作。
     const dirty = dirtyPaths(deps.root, paths);
     if (dirty.length > 0) {
       throw new PhaseFailure(
@@ -304,72 +397,128 @@ export function runPipeline(job: PipelineJob, deps: PipelineDeps): PipelineOutco
         false,
       );
     }
-    const compiled = compileSpec(job.spec, deps.root);
-    evidence.push(`check 源码：${compiled.source.replace(/\n/g, ' \\n ')}`);
-    if (isHandwritten(job.spec) && compiled.evalHelperNames.length > 0) {
-      evidence.push(
-        `注意：干跑使用作者提供的 evalHelpers（${compiled.evalHelperNames.join(', ')}）求值；`
-        + '它们不写进仓库，本工具**无法证明**其与文件里 private helper 的实现逐字等价。',
-      );
+    assertBatchInternalUnique(specs);
+    const compiled = specs.map(item => compileSpec(item, deps.root));
+    for (const [index, item] of specs.entries()) {
+      const source = compiled[index]!.source.replace(/\n/g, ' \\n ');
+      evidence.push(isBatch ? `check 源码（${item.id}）：${source}` : `check 源码：${source}`);
+      const compiledItem = compiled[index]!;
+      if (isHandwritten(item) && compiledItem.evalHelperNames.length > 0) {
+        const names = compiledItem.evalHelperNames.join(', ');
+        evidence.push(
+          isBatch
+            ? `注意（${item.id}）：干跑使用作者提供的 evalHelpers（${names}）求值；`
+              + '它们不写进仓库，本工具**无法证明**其与文件里 private helper 的实现逐字等价。'
+            : `注意：干跑使用作者提供的 evalHelpers（${names}）求值；`
+              + '它们不写进仓库，本工具**无法证明**其与文件里 private helper 的实现逐字等价。',
+        );
+      }
     }
     publish();
 
     // ── 阶段 0（续）：全色域干跑，零写盘 ───────────────────────────
     setPhase('dryrun');
     const existing = (deps.existingChecks ?? loadExistingChecks)();
-    const dryRun = deps.dryRun ?? runDryRun;
     const started = Date.now();
-    const result = dryRun({
-      check: compiled.predicate as (color: ColorInfo) => unknown,
-      existing,
-      group: job.spec.group ?? null,
-      ...(deps.domainSize !== undefined ? { total: deps.domainSize } : {}),
-    });
-    status.hits = result.hits;
-    console.log(
-      `[addbadge] 干跑：hits=${result.hits}/${result.total}（${((100 * result.hits) / result.total).toFixed(6)}%），`
-      + `耗时 ${((Date.now() - started) / 1000).toFixed(1)}s`,
-    );
-    evidence.push(
-      `干跑：hits=${result.hits}/${result.total}，Jaccard 最大=${result.maxJaccard ? `${result.maxJaccard.value.toFixed(4)}（${result.maxJaccard.id}）` : '无'}，`
-      + `必含关系 ${result.implications.length} 处。`,
-    );
-    if (result.violations.length > 0) {
-      const detail = result.violations.join('\n  - ');
-      evidence.push(`命中样例：${result.samples.hits.join(', ') || '（无）'}；未命中样例：${result.samples.misses.join(', ') || '（无）'}`);
-      throw new PhaseFailure(
-        'dryrun',
-        `干跑拒绝写入（工作区零改动）：\n  - ${detail}\n  命中样例：${result.samples.hits.join(', ') || '（无）'}；`
-        + `未命中样例：${result.samples.misses.join(', ') || '（无）'}`,
-        EXIT_ROLLED_BACK,
-        false,
+    if (isBatch) {
+      const dryRunBatch = deps.dryRunBatch ?? runBatchDryRun;
+      const result = dryRunBatch({
+        candidates: specs.map((item, index) => ({
+          id: item.id,
+          group: item.group ?? null,
+          check: compiled[index]!.predicate as (color: ColorInfo) => unknown,
+        })),
+        existing,
+        ...(deps.domainSize !== undefined ? { total: deps.domainSize } : {}),
+      });
+      const sum = result.candidates.reduce((total, item) => total + item.hits, 0);
+      status.hits = sum;
+      status.hitsBySpec = result.candidates.map(item => ({ id: item.id, hits: item.hits }));
+      console.log(
+        `[addbadge] 批量干跑（一次扫描 ${result.total} 色）：${specs.length} 条，hits 合计=${sum}，`
+        + `耗时 ${((Date.now() - started) / 1000).toFixed(1)}s，新 vs 新蕴含 ${result.pairwise.length} 处`,
       );
+      evidence.push(
+        `批量干跑：一次扫描 ${result.total} 色，${result.candidates.length} 条候选，hits 合计=${sum}；`
+        + `新 vs 新必然蕴含 ${result.pairwise.length} 处（同组豁免 ${result.pairwise.filter(item => item.allowed).length} 处），`
+        + `与既有徽章的蕴含 ${result.candidates.reduce((total, item) => total + item.implications.length, 0)} 处。`,
+      );
+      for (const item of result.candidates) {
+        evidence.push(
+          `  干跑 ${item.id}：hits=${item.hits}，Jaccard 最大=`
+          + `${item.maxJaccard ? `${item.maxJaccard.value.toFixed(4)}（${item.maxJaccard.id}）` : '无'}`,
+        );
+      }
+      if (result.violations.length > 0) {
+        const detail = result.violations.join('\n  - ');
+        const samples = result.candidates
+          .map(item => `${item.id}：命中 ${item.samples.hits.join(', ') || '（无）'} / 未命中 ${item.samples.misses.join(', ') || '（无）'}`)
+          .join('\n    ');
+        throw new PhaseFailure(
+          'dryrun',
+          `批量干跑拒绝写入（工作区零改动，整批回滚）：\n  - ${detail}\n  命中样例：\n    ${samples}`,
+          EXIT_ROLLED_BACK,
+          false,
+        );
+      }
+    } else {
+      const dryRun = deps.dryRun ?? runDryRun;
+      const result = dryRun({
+        check: compiled[0]!.predicate as (color: ColorInfo) => unknown,
+        existing,
+        group: spec.group ?? null,
+        ...(deps.domainSize !== undefined ? { total: deps.domainSize } : {}),
+      });
+      status.hits = result.hits;
+      console.log(
+        `[addbadge] 干跑：hits=${result.hits}/${result.total}（${((100 * result.hits) / result.total).toFixed(6)}%），`
+        + `耗时 ${((Date.now() - started) / 1000).toFixed(1)}s`,
+      );
+      evidence.push(
+        `干跑：hits=${result.hits}/${result.total}，Jaccard 最大=${result.maxJaccard ? `${result.maxJaccard.value.toFixed(4)}（${result.maxJaccard.id}）` : '无'}，`
+        + `必含关系 ${result.implications.length} 处。`,
+      );
+      if (result.violations.length > 0) {
+        const detail = result.violations.join('\n  - ');
+        evidence.push(`命中样例：${result.samples.hits.join(', ') || '（无）'}；未命中样例：${result.samples.misses.join(', ') || '（无）'}`);
+        throw new PhaseFailure(
+          'dryrun',
+          `干跑拒绝写入（工作区零改动）：\n  - ${detail}\n  命中样例：${result.samples.hits.join(', ') || '（无）'}；`
+          + `未命中样例：${result.samples.misses.join(', ') || '（无）'}`,
+          EXIT_ROLLED_BACK,
+          false,
+        );
+      }
     }
 
     // ── 阶段 1：快照 + 写入 ────────────────────────────────────────
     setPhase('snapshot');
-    snapshot = captureSnapshot(deps.root, snapshotsDir, paths, job.runId);
+    snapshot = captureSnapshot(deps.root, snapshotsDir, paths, runId);
     status.snapshotPath = snapshot.dir;
     evidence.push(`快照：${snapshot.dir}（${snapshot.files.length} 个文件，HEAD=${snapshot.head || '(非 git)'}）`);
     publish();
 
     setPhase('write');
-    const target = readFamilyFile(deps.root, job.spec.family);
-    const anchor = findArrayAnchor(target.content);
-    const indent = lastElementIndent(target.content, anchor);
-    const plan = planInsertion({
-      original: target.content,
-      anchor,
-      indent,
-      spec: job.spec,
-      checkSource: compiled.source,
-    });
-    writeFileSync(target.path, plan.content, 'utf8');
-    wrote = true;
-    // 写盘后的三自检：对**磁盘上的字节**再验一遍。
-    assertSelfCheck(target.content, readFileSync(target.path, 'utf8'), plan.block, plan.insertAt, job.spec.id);
-    evidence.push(`写盘：${job.spec.family}.ts（缩进模板 ${JSON.stringify(indent)}，插入点 ${plan.insertAt}）`);
-    publish();
+    for (const [index, item] of specs.entries()) {
+      const target = readFamilyFile(deps.root, item.family);
+      const anchor = findArrayAnchor(target.content);
+      const indent = lastElementIndent(target.content, anchor);
+      const plan = planInsertion({
+        original: target.content,
+        anchor,
+        indent,
+        spec: item,
+        checkSource: compiled[index]!.source,
+      });
+      writeFileSync(target.path, plan.content, 'utf8');
+      wrote = true;
+      // 写盘后的三自检：对**磁盘上的字节**再验一遍。
+      assertSelfCheck(target.content, readFileSync(target.path, 'utf8'), plan.block, plan.insertAt, item.id);
+      evidence.push(
+        `写盘：${item.family}.ts（${item.id}，缩进模板 ${JSON.stringify(indent)}，插入点 ${plan.insertAt}）`,
+      );
+      publish();
+    }
 
     // ── 阶段：tsc --noEmit ────────────────────────────────────────
     setPhase('typecheck');
@@ -383,7 +532,7 @@ export function runPipeline(job: PipelineJob, deps: PipelineDeps): PipelineOutco
       );
     }
 
-    // ── 阶段：enumerate（≥20 分钟超时）────────────────────────────
+    // ── 阶段：enumerate（≥20 分钟超时，**整批只跑一次**）──────────
     setPhase('enumerate');
     const enumerate = deps.exec(commands.enumerate, { timeoutMs: ENUMERATE_TIMEOUT_MS });
     if (enumerate.code !== 0) {
@@ -456,7 +605,7 @@ export function runPipeline(job: PipelineJob, deps: PipelineDeps): PipelineOutco
     evidence.push('docs/BADGES.md 已重生成。');
     publish();
 
-    // ── 阶段：supersession ───────────────────────────────────────
+    // ── 阶段：supersession（整批一次；任意一条被取代 → 整批回滚）──
     setPhase('supersession');
     const supersession = deps.exec(commands.supersession, { timeoutMs: ENUMERATE_TIMEOUT_MS });
     if (supersession.code !== 0) {
@@ -468,16 +617,23 @@ export function runPipeline(job: PipelineJob, deps: PipelineDeps): PipelineOutco
       );
     }
     const auditPath = `${deps.root}/docs/research/SUPERSESSION-AUDIT.md`;
-    const dead = findDeadBadge(readFileSync(auditPath, 'utf8'), job.spec.id);
-    if (dead) {
-      throw new PhaseFailure(
-        'supersession-dead',
-        `新徽章 "${job.spec.id}" 被 100% 取代（永远拿不到分）——必须改判定条件或调整 group。`,
-        EXIT_ROLLED_BACK,
-        true,
-      );
+    const audit = readFileSync(auditPath, 'utf8');
+    for (const item of specs) {
+      if (findDeadBadge(audit, item.id)) {
+        throw new PhaseFailure(
+          'supersession-dead',
+          `新徽章 "${item.id}" 被 100% 取代（永远拿不到分）——必须改判定条件或调整 group。`
+          + (isBatch ? `批量是**一个事务**：整批 ${specs.length} 条一起回滚。` : ''),
+          EXIT_ROLLED_BACK,
+          true,
+        );
+      }
     }
-    evidence.push('supersession：新徽章未被 100% 取代。');
+    evidence.push(
+      isBatch
+        ? `supersession：${specs.length} 条新徽章均未被 100% 取代。`
+        : 'supersession：新徽章未被 100% 取代。',
+    );
     publish();
 
     // ── 阶段：test（docs 失败可归因时重跑一次）────────────────────
@@ -506,13 +662,14 @@ export function runPipeline(job: PipelineJob, deps: PipelineDeps): PipelineOutco
     setPhase('finish');
     if (snapshot) dropSnapshot(snapshot);
     const hits = status.hits ?? 0;
-    return finish(
-      'succeeded',
-      EXIT_OK,
-      `加徽章成功：${job.spec.id}（${job.spec.family}，hits=${hits}）。`
-      + '流水线不自动 commit：请 review `git diff` 后自行提交。'
-      + '另外若本家族有 docs/badges/*.md 备注文件，请人工同步。',
-    );
+    const conclusion = isBatch
+      ? `批量加徽章成功：${specs.length} 条（${specs.map(item => item.id).join('、')}），hits 合计=${hits}。`
+        + '流水线不自动 commit：请 review `git diff` 后自行提交。'
+        + '另外若这些家族有 docs/badges/*.md 备注文件，请人工同步。'
+      : `加徽章成功：${spec.id}（${spec.family}，hits=${hits}）。`
+        + '流水线不自动 commit：请 review `git diff` 后自行提交。'
+        + '另外若本家族有 docs/badges/*.md 备注文件，请人工同步。';
+    return finish('succeeded', EXIT_OK, conclusion);
   } catch (err) {
     if (err instanceof PhaseFailure) {
       if (err.needsRollback || wrote) return rollback(err);

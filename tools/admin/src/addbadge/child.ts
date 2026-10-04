@@ -10,7 +10,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXIT_ROLLED_BACK, runPipeline, shellExec } from './pipeline';
+import { EXIT_ROLLED_BACK, runBatchPipeline, runPipeline, shellExec, type PipelineDeps } from './pipeline';
 import { parseBadgeSpec } from './spec';
 import {
   addBadgePaths,
@@ -27,7 +27,10 @@ export const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url))
 
 export interface ChildJobFile {
   runId: string;
-  spec: unknown;
+  /** 单条作业（旧格式）。 */
+  spec?: unknown;
+  /** 批量作业：原始 spec JSON 数组。 */
+  specs?: unknown[];
   logPath: string;
   startedAt?: string;
 }
@@ -46,9 +49,16 @@ export function runChild(jobPath: string, adminRoot: string, root: string): numb
   // spec 重新校验（提交时已经验过一遍，这里是第二道门）。
   // 它**必须在自己的 try 里**：作业文件坏了、或者将来有人手改作业文件时，
   // 子进程不能带着未捕获异常死掉——死了就不会写状态、也不会释放锁。
-  let spec;
+  let specs;
+  let isBatch = false;
   try {
-    spec = parseBadgeSpec(job.spec);
+    if (Array.isArray(job.specs)) {
+      isBatch = true;
+      specs = job.specs.map((raw, index) => parseBadgeSpec(raw, `specs[${index}]`));
+      if (specs.length === 0) throw new Error('批量作业的 specs 是空数组');
+    } else {
+      specs = [parseBadgeSpec(job.spec)];
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[addbadge] 作业文件里的 spec 无法解析：${message}`);
@@ -73,34 +83,44 @@ export function runChild(jobPath: string, adminRoot: string, root: string): numb
     return EXIT_ROLLED_BACK;
   }
 
+  const meta = specs.length === 1
+    ? { id: specs[0]!.id, name: specs[0]!.name, family: specs[0]!.family, group: specs[0]!.group ?? null }
+    : {
+        id: `batch-${specs.length}`,
+        name: `${specs.length} 条徽章`,
+        family: [...new Set(specs.map(item => item.family))].join('+'),
+        group: null,
+      };
+
   // 改写锁：提交者把 pid 记成它自己（临时进程），真正跑管道的是本进程。
   // 直接覆盖而不是「先删再抢」——删了再抢会开出一个「无锁窗口」。
   const lock: LockInfo = {
     runId: job.runId,
     pid: process.pid,
     startedAt: job.startedAt ?? new Date().toISOString(),
-    spec: { id: spec.id, name: spec.name, family: spec.family, group: spec.group ?? null },
+    spec: meta,
+    ...(isBatch ? { specCount: specs.length } : {}),
     logPath: job.logPath,
   };
   writeFileSync(paths.lockFile, JSON.stringify(lock, null, 2), 'utf8');
 
   try {
-    const outcome = runPipeline(
-      { runId: job.runId, spec, logPath: job.logPath },
-      {
-        root,
-        adminRoot,
-        now: () => new Date(),
-        exec: shellExec(root),
-        onStatus: status => {
-          try {
-            writeStatus(adminRoot, status);
-          } catch (err) {
-            console.error(`[addbadge] 写状态文件失败：${err instanceof Error ? err.message : String(err)}`);
-          }
-        },
+    const deps: PipelineDeps = {
+      root,
+      adminRoot,
+      now: () => new Date(),
+      exec: shellExec(root),
+      onStatus: status => {
+        try {
+          writeStatus(adminRoot, status);
+        } catch (err) {
+          console.error(`[addbadge] 写状态文件失败：${err instanceof Error ? err.message : String(err)}`);
+        }
       },
-    );
+    };
+    const outcome = isBatch
+      ? runBatchPipeline({ runId: job.runId, specs, logPath: job.logPath }, deps)
+      : runPipeline({ runId: job.runId, spec: specs[0]!, logPath: job.logPath }, deps);
     console.log(`[addbadge] 结束：exitCode=${outcome.exitCode} state=${outcome.state}`);
     console.log(`[addbadge] ${outcome.conclusion}`);
     return outcome.exitCode;
@@ -111,9 +131,10 @@ export function runChild(jobPath: string, adminRoot: string, root: string): numb
       writeStatus(adminRoot, {
         ...makeStatus({
           runId: job.runId,
-          spec: { id: spec.id, name: spec.name, family: spec.family, group: spec.group ?? null },
+          spec: meta,
           logPath: job.logPath,
           pid: process.pid,
+          ...(isBatch ? { specCount: specs.length } : {}),
         }),
         state: 'refused',
         phase: 'done',

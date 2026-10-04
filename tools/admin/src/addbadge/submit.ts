@@ -8,14 +8,17 @@
  *   - 浏览器/终端只通过 `status.json` 观察进度（轮询），不持有任何连接状态。
  *
  * 锁的语义：**已有管道在跑就拒绝，不排队、不并发**（`O_EXCL` 是内核保证）。
+ *
+ * 批量（{@link submitBadgeBatchJob}）：一次提交 N 条 spec，作业文件里存**原始 JSON 数组**；
+ * 子进程用 `runBatchPipeline` 把整批当一个事务跑。锁、状态文件、子进程架构完全复用。
  */
 import { spawn } from 'node:child_process';
 import { closeSync, openSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertIdUnique, assertNameUniqueInFamily } from './families';
 import { compileSpec } from './compile';
+import { assertBatchInternalUnique, summarizeSpecs, EXIT_INTERRUPTED, EXIT_LOCKED } from './pipeline';
 import { SpecError, type BadgeSpec } from './spec';
-import { EXIT_INTERRUPTED, EXIT_LOCKED } from './pipeline';
 import {
   acquireLock,
   addBadgePaths,
@@ -26,6 +29,7 @@ import {
   releaseLock,
   writeStatus,
   type LockInfo,
+  type StatusSpec,
 } from './state';
 
 export interface SpawnedChild {
@@ -60,6 +64,18 @@ export interface SubmitOptions {
   spawn?: SpawnFn;
 }
 
+/** 批量提交：N 条原始 spec + 归一化结果。 */
+export interface BatchSubmitOptions {
+  rawSpecs: unknown[];
+  specs: BadgeSpec[];
+  root: string;
+  adminRoot: string;
+  logPath: string;
+  runId: string;
+  force?: boolean;
+  spawn?: SpawnFn;
+}
+
 export type SubmitResult =
   | { ok: true; runId: string; logPath: string; pid: number | undefined }
   | { ok: false; exitCode: number; reason: string };
@@ -70,12 +86,61 @@ export function makeRunId(spec: BadgeSpec, now: Date): string {
   return `${stamp}-${spec.id}`.replace(/[^A-Za-z0-9TZ._-]/g, '_');
 }
 
+/** 批量 runId：时间戳 + `batchN` + 第一条 id（长度 N 让人一眼看出是批量）。 */
+export function makeBatchRunId(specs: readonly BadgeSpec[], now: Date): string {
+  const stamp = now.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  const head = specs[0]?.id ?? 'batch';
+  return `${stamp}-batch${specs.length}-${head}`.replace(/[^A-Za-z0-9TZ._-]/g, '_');
+}
+
 /**
  * 提交（同步返回）。失败一律是**明确的拒绝**，绝不半推半就。
  */
 export function submitBadgeJob(options: SubmitOptions): SubmitResult {
-  const { root, adminRoot, spec, runId, logPath } = options;
+  return submitJob({
+    batch: false,
+    rawSpecs: [options.rawSpec],
+    specs: [options.spec],
+    root: options.root,
+    adminRoot: options.adminRoot,
+    logPath: options.logPath,
+    runId: options.runId,
+    ...(options.force !== undefined ? { force: options.force } : {}),
+    ...(options.spawn ? { spawn: options.spawn } : {}),
+  });
+}
+
+/** 批量提交：N 条 spec 是一个事务（全有或全无），其余与单条完全一致。 */
+export function submitBadgeBatchJob(options: BatchSubmitOptions): SubmitResult {
+  return submitJob({
+    batch: true,
+    rawSpecs: options.rawSpecs,
+    specs: options.specs,
+    root: options.root,
+    adminRoot: options.adminRoot,
+    logPath: options.logPath,
+    runId: options.runId,
+    ...(options.force !== undefined ? { force: options.force } : {}),
+    ...(options.spawn ? { spawn: options.spawn } : {}),
+  });
+}
+
+interface InternalSubmitOptions {
+  batch: boolean;
+  rawSpecs: unknown[];
+  specs: BadgeSpec[];
+  root: string;
+  adminRoot: string;
+  logPath: string;
+  runId: string;
+  force?: boolean;
+  spawn?: SpawnFn;
+}
+
+function submitJob(options: InternalSubmitOptions): SubmitResult {
+  const { root, adminRoot, specs, runId, logPath } = options;
   ensureOutDirs(adminRoot);
+  const meta: StatusSpec = summarizeSpecs(specs);
 
   // ① 锁：已有管道在跑 → 拒绝（不排队、不并发）。
   const lockState = readLock(adminRoot);
@@ -102,22 +167,24 @@ export function submitBadgeJob(options: SubmitOptions): SubmitResult {
 
   // ② 写盘前的静态校验：任何错误都在这里返回，工作区零改动、零子进程。
   try {
-    assertIdUnique(root, spec.id);
-    assertNameUniqueInFamily(root, spec.family, spec.name);
-    compileSpec(spec, root);
+    for (const spec of specs) {
+      assertIdUnique(root, spec.id);
+      assertNameUniqueInFamily(root, spec.family, spec.name);
+    }
+    assertBatchInternalUnique(specs);
+    for (const spec of specs) compileSpec(spec, root);
   } catch (err) {
     const reason = err instanceof SpecError ? err.message : err instanceof Error ? err.message : String(err);
     return { ok: false, exitCode: 2, reason: `spec 校验失败（未写任何文件）：${reason}` };
   }
 
-  // ③ 写作业文件（子进程读它）。
+  // ③ 写作业文件（子进程读它）。单条存 `spec`（旧格式），批量存 `specs` 数组。
   const paths = addBadgePaths(adminRoot);
   const jobPath = join(paths.jobsDir, `${runId}.json`);
-  writeFileSync(
-    jobPath,
-    JSON.stringify({ runId, spec: options.rawSpec, logPath, startedAt: new Date().toISOString() }, null, 2),
-    'utf8',
-  );
+  const payload = options.batch
+    ? { runId, specs: options.rawSpecs, logPath, startedAt: new Date().toISOString() }
+    : { runId, spec: options.rawSpecs[0], logPath, startedAt: new Date().toISOString() };
+  writeFileSync(jobPath, JSON.stringify(payload, null, 2), 'utf8');
 
   // ④ 抢锁。stale + force 时先接管。
   if (lockState.kind === 'stale' && options.force === true) {
@@ -128,7 +195,8 @@ export function submitBadgeJob(options: SubmitOptions): SubmitResult {
     runId,
     pid: process.pid,
     startedAt: new Date().toISOString(),
-    spec: { id: spec.id, name: spec.name, family: spec.family, group: spec.group ?? null },
+    spec: meta,
+    ...(options.batch ? { specCount: specs.length } : {}),
     logPath,
   };
   const acquired = acquireLock(adminRoot, lock);
@@ -166,11 +234,14 @@ export function submitBadgeJob(options: SubmitOptions): SubmitResult {
   writeStatus(adminRoot, {
     ...makeStatus({
       runId,
-      spec: { id: spec.id, name: spec.name, family: spec.family, group: spec.group ?? null },
+      spec: meta,
       logPath,
       pid: child.pid ?? process.pid,
+      ...(options.batch ? { specCount: specs.length, specs: specs.map(item => summarizeSpecs([item])) } : {}),
     }),
-    conclusion: '已提交：等待子进程开始写进度…',
+    conclusion: options.batch
+      ? `已提交批量作业（${specs.length} 条）：等待子进程开始写进度…`
+      : '已提交：等待子进程开始写进度…',
   });
 
   return { ok: true, runId, logPath, pid: child.pid };

@@ -74,6 +74,7 @@ export const USAGE = `HueDle 本地管理工具
   tsx src/cli.ts stats [--days <n>] [--html <path>] [--include-names]
   tsx src/cli.ts ui    [--days <n>] [--port <n>] [--include-names]
   tsx src/cli.ts add-badge --spec <file.json> [--force] [--no-wait]
+  tsx src/cli.ts add-badge --spec <badges.json>   # 内容是数组 = 批量（一个事务，只跑一次枚举）
   tsx src/cli.ts add-badge --ts <expr> --id <id> --name <n> --description <d> --family <f>
                            [--group <g>] [--helper-eval name=<src>]... [--force] [--no-wait]
   tsx src/cli.ts add-badge --status
@@ -84,7 +85,9 @@ export const USAGE = `HueDle 本地管理工具
   --html <path>     仅 stats：额外生成自包含静态 HTML 报告（默认 out/stats-report.html）
   --port <n>        仅 ui：监听端口，默认 ${UI_DEFAULT_PORT}（0 = 内核分配空闲端口）
   --include-names   显示用户名明细（默认关闭；ui 里只在页面显示，不写任何文件）
-  --spec <path>     仅 add-badge：JSON spec（when 结构化，或 handwritten 手写）
+  --spec <path>     仅 add-badge：JSON spec（when 结构化，或 handwritten 手写）。
+                    **内容是数组时 = 批量**：N 条一起提交，干跑/枚举/docs/supersession/test
+                    对整批只跑一次；整批是一个事务（任意一条失败 → 全部回滚）。
   --ts <expr>       仅 add-badge：手写单表达式（可引用家族文件里已有的 private helper）
   --helper-eval     仅 add-badge：\`name=<js 源码>\`，private helper 的**干跑求值副本**
   --id/--name/--description/--family/--group   仅 add-badge --ts：元数据
