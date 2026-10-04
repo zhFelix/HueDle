@@ -242,7 +242,14 @@ export function loadHistory(): HistoryItem[] {
 // ---------------------------------------------------------------------------
 
 /** `YYYY-MM-DD` 往前推一天（纯 UTC 日期算术，不受本地时区与夏令时影响）。 */
-function previousUtcDay(day: string): string {
+/**
+ * UTC 自然日的前一天。
+ *
+ * 导出是**刻意的**：成就里的「最长连续」、时间线的日期排布都需要它，
+ * 而这些功能由不同的人开发。与其让每处各写一份等价的日期算术
+ * （时区与 UTC 边界最容易写出细微不一致），不如共用这一个实现。
+ */
+export function previousUtcDay(day: string): string {
   const [y, m, d] = day.split('-').map(Number) as [number, number, number];
   return utcDate(new Date(Date.UTC(y, m - 1, d) - 86_400_000));
 }

@@ -21,15 +21,37 @@
  * ④ 空状态：一条都没收集时给一句话 + 去今日页的入口；此时图鉴主体照常渲染，
  *    让玩家看到「还有 76 条」而不是一片空白。
  *
- * 数据全部来自 `useBadges()`（它复用 `useHistory()`，本地 / 登录双模式同源）。
+ * ⑤ 详情：点任意一条（已获得或未获得）就地展开，再点收起，允许多条同时展开。
+ *    展开内容见 `BadgeDetailPanel`——已获得才显示概率 / 判定条件 / 命中日期；
+ *    **未获得只显示名称与「未获得」**（概率比稀有度胶囊泄露得更多）。
+ *
+ * 数据全部来自 `useBadges()`（已收集口径）与 `useBadgeDetail()`（命中明细，
+ * 它复用 `useHistory()`），本地 / 登录双模式同源。
  */
+import { ref } from 'vue';
 import { RouterLink } from 'vue-router';
+import BadgeDetailPanel from '../components/BadgeDetailPanel.vue';
 import RarityBadge from '../components/RarityBadge.vue';
+import { useBadgeDetail } from '../composables/useBadgeDetail';
 import { useBadges } from '../composables/useBadges';
 import { FAMILY_META } from '../lib/families';
 import { formatCp } from '../lib/format';
 
 const { families, totalCollected, totalCount, isCollected, badgesByFamily, isLoading } = useBadges();
+const { detailOf } = useBadgeDetail();
+
+/**
+ * 已展开的徽章 id 集合（与 `HistoryList` 同款：整条是按钮、就地展开、允许多条同时展开）。
+ * 状态只活在页面内，不进 URL、不持久化；刷新回到全折叠。
+ */
+const expandedIds = ref<ReadonlySet<string>>(new Set());
+
+function toggleBadge(id: string): void {
+  const next = new Set(expandedIds.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  expandedIds.value = next;
+}
 
 /** 进度条宽度按百分比；总数为 0 时兜底 0，避免 NaN。 */
 function progressPercent(collected: number, total: number): string {
@@ -122,7 +144,7 @@ function progressPercent(collected: number, total: number): string {
         <li
           v-for="badge in group.badges"
           :key="badge.id"
-          class="flex items-start gap-3 rounded-xl border p-3"
+          class="overflow-hidden rounded-xl border"
           :class="
             isCollected(badge.id)
               ? 'border-ink-700 bg-ink-900'
@@ -132,38 +154,56 @@ function progressPercent(collected: number, total: number): string {
           :data-badge-id="badge.id"
           :data-collected="isCollected(badge.id) ? 'true' : 'false'"
         >
-          <div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-2">
-              <span
-                class="font-medium"
-                :class="isCollected(badge.id) ? 'text-neutral-100' : 'text-neutral-400'"
-              >
-                {{ badge.name }}
-              </span>
-              <!-- 未获得：连稀有度都不透露，只留名称 -->
-              <template v-if="isCollected(badge.id)">
-                <RarityBadge :rarity="badge.rarity" size="sm" />
-              </template>
-              <span
-                v-else
-                class="rounded-full border border-ink-700 px-2 py-0.5 text-xs text-neutral-500"
-              >
-                未获得
-              </span>
-            </div>
-            <!-- 未获得：判定条件不显示（保留「发现」的乐趣） -->
-            <p v-if="isCollected(badge.id)" class="mt-1 text-sm text-neutral-400">
-              {{ badge.description }}
-            </p>
-          </div>
-          <!-- 未获得：CP 不显示 -->
-          <span
-            v-if="isCollected(badge.id)"
-            class="shrink-0 font-mono text-sm text-neutral-300"
-            data-testid="badge-cp"
+          <button
+            type="button"
+            class="flex w-full items-start gap-3 p-3 text-left transition-colors hover:bg-ink-800/50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-400"
+            :aria-expanded="expandedIds.has(badge.id)"
+            :aria-label="`${expandedIds.has(badge.id) ? '收起' : '展开'} ${badge.name} 详情`"
+            @click="toggleBadge(badge.id)"
           >
-            {{ formatCp(badge.cp) }}
-          </span>
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <span
+                  class="font-medium"
+                  :class="isCollected(badge.id) ? 'text-neutral-100' : 'text-neutral-400'"
+                >
+                  {{ badge.name }}
+                </span>
+                <!-- 未获得：连稀有度都不透露，只留名称 -->
+                <template v-if="isCollected(badge.id)">
+                  <RarityBadge :rarity="badge.rarity" size="sm" />
+                </template>
+                <span
+                  v-else
+                  class="rounded-full border border-ink-700 px-2 py-0.5 text-xs text-neutral-500"
+                >
+                  未获得
+                </span>
+              </div>
+              <!-- 未获得：判定条件不显示（保留「发现」的乐趣） -->
+              <p v-if="isCollected(badge.id)" class="mt-1 text-sm text-neutral-400">
+                {{ badge.description }}
+              </p>
+            </div>
+            <!-- 未获得：CP 不显示 -->
+            <span
+              v-if="isCollected(badge.id)"
+              class="shrink-0 font-mono text-sm text-neutral-300"
+              data-testid="badge-cp"
+            >
+              {{ formatCp(badge.cp) }}
+            </span>
+            <span class="w-3 shrink-0 text-center text-xs text-neutral-500" aria-hidden="true">
+              {{ expandedIds.has(badge.id) ? '▾' : '▸' }}
+            </span>
+          </button>
+
+          <!-- 就地展开的详情；未获得时只有名称与「未获得」（见 BadgeDetailPanel） -->
+          <BadgeDetailPanel
+            v-if="expandedIds.has(badge.id)"
+            :badge="badge"
+            :detail="detailOf(badge.id)"
+          />
         </li>
       </ul>
     </section>

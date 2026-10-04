@@ -6,14 +6,25 @@
  * 徽章列表仍由 `HistoryList` 在展开时按存档还原（不重跑 `check`、不重算分数）。
  * 这里只是把「身份」和「历史」合到了一页，并把统计的主次调了一下。
  *
- * 三段：
+ * 六段（自上而下）：
  *   ① 身份区——登录模式显示用户名 + 登出；本地模式显示「本地模式」+ 去登录的入口。
  *      并说明两种模式抽到的是**不同的颜色**（DESIGN 第 11.5 节），这是玩家最容易
  *      困惑的点：本地抽了今天再登录，看到的是账户身份的今日颜色，不是"多抽了一次"。
- *   ② 统计区——主指标是**收集天数**（原来的「已记录天数」）；次要指标是当前连续、
- *      最高 CP（含那天的日期）与稀有度分布。首页那个「连续天数」已经从首页移除，
- *      累计天数只在这里出现。
- *   ③ 颜色历史——复用 `HistoryList`（折叠 / 展开徽章 / 「同类更强」降级 / 今天标记）。
+ *   ② 统计区——主指标是**收集天数**（原来的「已记录天数」）；次要指标是**当前连续
+ *      与最长连续并列**、最高 CP（含那天的日期）与稀有度分布。首页那个「连续天数」
+ *      已经从首页移除，累计天数只在这里出现。
+ *      为什么两个连续都要显示：成就里的连续类（三连 / 七日不辍）用的是**最长**连续
+ *      （闩锁语义，见 `lib/achievements.ts`），只看「当前连续」会出现「当前 0 天，
+ *      但三连亮着」——玩家会当成 bug（设计文档 §8 Q11）。
+ *   ③ 成就——`AchievementList`（功能②，纯展示，吃 `entries`）。
+ *   ④ 颜色时间线——`ColorTimeline`（功能③，纯展示，吃 `entries`）。
+ *   ⑤ 颜色历史——复用 `HistoryList`（折叠 / 展开徽章 / 「同类更强」降级 / 今天标记）。
+ *   ⑥ 清空本地记录。
+ *
+ * ③ / ④ **空历史时也渲染**：它们自带空态（「抽到第一天的颜色…」「还没有颜色记录。」），
+ * 整体隐藏等于让这两句空态在页面上不可达（设计文档 §2.7 / §3.6）。
+ * 数据一律来自**本页唯一一个** `useHistory()` 实例，两个组件内部不各自取数——
+ * 同页出现多个历史数据源正是集成阶段最容易犯的错（设计文档 §4.3）。
  *
  * 「清空本地记录」**只在本地模式显示**：登录模式没有本地记录可清（数据在服务端）。
  * 清空是两步：先在原地展开确认条，确认后才真的清（不用 `window.confirm`）。
@@ -21,18 +32,32 @@
  */
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
+import AchievementList from '../components/AchievementList.vue';
+import ColorTimeline from '../components/ColorTimeline.vue';
 import HistoryList from '../components/HistoryList.vue';
 import RarityBadge from '../components/RarityBadge.vue';
 import { useHistory } from '../composables/useHistory';
+import { longestStreak } from '../lib/achievements';
 import { RARITY_ORDER } from '../lib/rarity';
 import { formatCp } from '../lib/format';
 import { useSessionStore } from '../stores/session';
 
 const session = useSessionStore();
+// 本页**唯一**的历史数据源：成就与时间线都只消费它的 `entries`（props 传入），
+// 两个子组件内部都不会再调一次 `useHistory()`。
 const { entries, stats, isEmpty, canClear, isLoading, error, reload, clear } = useHistory();
 
 const isConfirmingClear = ref(false);
 const clearedNotice = ref('');
+
+/**
+ * 最长连续（历史里曾经连续最久的那一段）。
+ *
+ * 与 `stats.streak`（当前连续，今天没抽就是 0）并列显示：成就里的连续类用的是
+ * 最长连续，只显示「当前」会让点亮的成就看起来像算错了（设计文档 §8 Q11）。
+ * 直接从本页已有的 `entries` 派生，不再起第二个 `useHistory()`。
+ */
+const longest = computed(() => longestStreak(entries.value));
 
 /** 稀有度分布：只保留有记录的天数，不摆一排 0。 */
 const distribution = computed(() =>
@@ -130,7 +155,7 @@ function confirmClear(): void {
       </p>
     </section>
 
-    <template v-else>
+    <template v-if="!isEmpty">
       <!-- ② 统计区：收集天数是主指标（首页已不再显示「连续天数」） -->
       <section class="rounded-2xl border border-ink-700 bg-ink-900 p-4" data-testid="stats-section">
         <div class="flex flex-wrap items-end justify-between gap-4">
@@ -141,10 +166,16 @@ function confirmClear(): void {
             </p>
           </div>
           <dl class="flex flex-wrap gap-x-8 gap-y-3">
-            <div>
+            <div data-testid="streak-current">
               <dt class="text-xs uppercase tracking-widest text-neutral-500">当前连续</dt>
               <dd class="mt-1 font-mono text-xl text-neutral-100">
                 {{ stats.streak }}<span class="ml-1 text-sm text-neutral-500">天</span>
+              </dd>
+            </div>
+            <div data-testid="streak-longest">
+              <dt class="text-xs uppercase tracking-widest text-neutral-500">最长连续</dt>
+              <dd class="mt-1 font-mono text-xl text-neutral-100">
+                {{ longest }}<span class="ml-1 text-sm text-neutral-500">天</span>
               </dd>
             </div>
             <div>
@@ -174,8 +205,19 @@ function confirmClear(): void {
           </span>
         </div>
       </section>
+    </template>
 
-      <!-- ③ 颜色历史 -->
+    <!--
+      ③ 成就 + ④ 颜色时间线：**空历史也渲染**。
+      两个组件自带空态（成就 13 条全未点亮 + 一句提示；时间线「还没有颜色记录。」），
+      整体隐藏会让这些空态在页面上不可达（设计文档 §2.7 / §3.6）。
+      数据都来自本页那个唯一的 `useHistory()`，props 透传，组件内部不各自取数。
+    -->
+    <AchievementList :entries="entries" />
+    <ColorTimeline :entries="entries" />
+
+    <template v-if="!isEmpty">
+      <!-- ⑤ 颜色历史 -->
       <section class="space-y-3" aria-label="颜色历史">
         <h2 class="text-xs uppercase tracking-widest text-neutral-500">颜色历史</h2>
         <HistoryList :entries="entries" />
