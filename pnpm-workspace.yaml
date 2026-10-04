@@ -1,6 +1,9 @@
 packages:
   - 'packages/*'
   - 'apps/*'
+  # 本地管理工具（tools/admin）：只在开发机上跑，绝不进生产镜像
+  # （由根 .dockerignore 的 `tools` 排除，因为 Dockerfile 用 `COPY . .`）。
+  - 'tools/*'
 minimumReleaseAgeExclude:
   - '@vue/language-core@3.3.12'
   - vue-tsc@3.3.12

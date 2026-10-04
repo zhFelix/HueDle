@@ -1,0 +1,24 @@
+{
+  "name": "@huedle/admin",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "HueDle 本地管理工具（CLI，只读统计；不监听端口、不进生产镜像）",
+  "scripts": {
+    "stats": "tsx src/cli.ts stats",
+    "test": "vitest run",
+    "test:db": "vitest run --config vitest.db.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@huedle/shared": "workspace:*",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.3"
+  }
+}

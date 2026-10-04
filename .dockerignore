@@ -43,6 +43,17 @@ apps/web/vitest.config.ts
 apps/web/env.d.ts
 apps/web/tsconfig*.json
 
+# ── 本地管理工具：绝不进生产镜像 ───────────────────────────
+# Dockerfile 是 `COPY . .`，不排除就会把 tools/admin（能连生产库的本地管理工具）
+# 一并打进部署到 Railway 的 API 镜像。这是「管理面不进生产」唯一的强制手段。
+# ⚠️ 不能整目录排除 `tools`：Dockerfile 的 `--frozen-lockfile` 需要
+# tools/admin 的 package.json（见那边的注释），整目录排除会让那行 COPY 失败。
+# 所以只排除它的源码与产物，清单文件保留——与 apps/web 同一手法。
+tools/**/src
+tools/**/out
+tools/**/node_modules
+tools/**/*.md
+
 # ── 开发期杂项 ─────────────────────────────────────────────
 *.log
 .DS_Store

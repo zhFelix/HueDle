@@ -15,9 +15,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ── shared + web：纯内存，秒级 ───────────────────────────────────────────
+  # ── shared + web + admin：纯内存，秒级 ───────────────────────────────────
   test:
-    name: shared + web
+    name: shared + web + admin
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +45,15 @@ jobs:
       # 构建也一起验，避免"测试过了但打不出包"
       - name: web 构建
         run: pnpm -C apps/web build
+
+      # tools/admin：本地管理工具。CI **没有数据库凭据**，所以这里只跑
+      # 不依赖数据库的部分（类型检查 + SQL 守卫 / 渲染层 / 脱敏 / 纯函数分析）。
+      # 连真库的只读强制与 M1–M8 在本地用 `pnpm -C tools/admin run test:db` 跑。
+      - name: admin 类型检查
+        run: pnpm -C tools/admin exec tsc --noEmit
+
+      - name: admin 测试（不依赖数据库）
+        run: pnpm -C tools/admin test
 
   # ── api：需要一个真实 Postgres ───────────────────────────────────────────
   # 用 GitHub 的 service 容器，与 runner 同机 —— 查询是局域网速度，
