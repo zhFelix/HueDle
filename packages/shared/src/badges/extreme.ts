@@ -97,4 +97,11 @@ export const extremeBadges: BadgeDef[] = [
     family: 'extreme',
     check: c => [c.r, c.g, c.b].filter(v => v <= 10).length === 2,
   },
+  {
+    id: 'extreme-404',
+    name: '404 Not Found',
+    description: 'HEX 严格等于 #404404',
+    family: 'extreme',
+    check: c => c.hex==="#404404",
+  },
 ];

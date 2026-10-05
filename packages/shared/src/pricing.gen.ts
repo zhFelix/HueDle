@@ -64,6 +64,7 @@ export const PRICING: Record<string, BadgePricing> = {
   'culture-van-gogh-blue': { hits: 1, ep: 1677721600, rarity: 'mythic' },
   'culture-whatsapp-green': { hits: 1, ep: 1677721600, rarity: 'mythic' },
   'culture-youtube-red': { hits: 1, ep: 1677721600, rarity: 'mythic' },
+  'extreme-404': { hits: 1, ep: 1677721600, rarity: 'mythic' },
   'extreme-absolute-black': { hits: 1, ep: 1677721600, rarity: 'mythic' },
   'extreme-absolute-white': { hits: 1, ep: 1677721600, rarity: 'mythic' },
   'extreme-ceiling-glow': { hits: 815, ep: 2058554.1104294478, rarity: 'anomaly' },
@@ -169,3 +170,17 @@ export const SCORE_QUANTILES: {
 
 /** 生成时的全色域大小，用于校验数据新鲜度。 */
 export const GENERATED_AT_TOTAL_COLORS = 16777216;
+
+/**
+ * 生成时 `src/badges/*.ts` 文本的 sha256 指纹（含 10 个家族文件与 `helpers.ts`）。
+ *
+ * **剔除 `name` / `description` 文案**：它们不进 `check`、不影响 `hits`，改文案不必重跑枚举。
+ * 文件名也入哈希（新增 / 删除 / 改名家族文件都会变），文件按路径升序拼接，结果与加载器无关。
+ *
+ * 默认测试 `src/badges/__tests__/sourceFingerprint.test.ts` 会重算并比对，用来发现
+ * 「改了 `check` 但没重跑枚举」。**边界**：只覆盖 `src/badges/` 下直接的 `.ts`
+ * （排除 `index.ts` / `defs.ts` / `renderDoc.ts` 与 `*.test.ts`）；`check` 若依赖
+ * `badges/` 之外的文件（如 `../types.ts`、`../color.ts`），其变化**不在**指纹内。
+ * 指纹不判断定价数值对不对，那由流水线的 supersession 阶段覆盖。
+ */
+export const SOURCE_FINGERPRINT = 'a466a681b24512d374d4187f8789a887408b8428c77c813b9d2ab6cf92c4ae56';
