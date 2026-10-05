@@ -273,3 +273,38 @@ describe('HTTP 层：?m= 只是"选哪一项"，不新增任何写路径', () =>
     expect(res.headers.get('allow')).toBe('GET, HEAD');
   });
 });
+
+/**
+ * 侧栏到「加徽章」的入口。
+ *
+ * 它**刻意不复用 `.nav-item`**：上面那条「侧栏恰好 9 个指标项」的断言，
+ * 意义是「导航项 == 报告里实际存在的指标」。把另一个功能混进去会让它失去意义，
+ * 所以这里同时断言两件事：入口在，且指标项仍是 9 个。
+ */
+describe('侧栏到「加徽章」的入口', () => {
+  it('侧栏有一个指向 /badge 的入口', () => {
+    const sidebar = sidebarOf(renderUiPage(fullReport(), { days: 30 }));
+    expect(sidebar).toContain('<a class="nav-action" href="/badge">');
+    expect(sidebar).toContain('添加徽章');
+  });
+
+  it('它不混进指标项：nav-item 仍然是 9 个', () => {
+    const sidebar = sidebarOf(renderUiPage(fullReport(), { days: 30 }));
+    expect(sidebar.match(/class="nav-item"/g)).toHaveLength(9);
+    expect(sidebar.match(/class="nav-action"/g)).toHaveLength(1);
+  });
+
+  it('它是普通链接，不是按钮也不是 JS——统计页仍然零 <script>', () => {
+    const html = renderUiPage(fullReport(), { days: 30 });
+    expect(html).not.toContain('<script');
+    // 选中态只属于指标项；入口不该被标成「当前页」
+    expect(sidebarOf(html)).not.toContain('nav-action" href="/badge" aria-current');
+  });
+
+  it('换窗口时入口仍指向同一个地方（它是另一个页面，不带 ?days=）', () => {
+    for (const days of UI_WINDOWS) {
+      const sidebar = sidebarOf(renderUiPage(fullReport(), { days }));
+      expect(sidebar).toContain('<a class="nav-action" href="/badge">');
+    }
+  });
+});

@@ -208,6 +208,16 @@ export const UI_CSS = `
   .nav-id { font-family: var(--font-mono); font-size: .82rem; font-weight: 600; }
   .nav-label { font-size: .75rem; color: var(--neutral-500); }
   .nav-item[aria-current="page"] .nav-label { color: var(--neutral-300); }
+
+  /* 「加徽章」是另一个功能，不是指标——用分隔线与指标列表分开。
+     刻意不复用 .nav-item：那样会混进「侧栏恰好 9 个指标项」的断言里，
+     而那条断言的意义正是「导航项 == 报告里实际存在的指标」。 */
+  .nav-sep { height: 1px; background: var(--ink-800); margin: .6rem .4rem; }
+  .nav-action { display: flex; align-items: baseline; gap: .55rem; padding: .5rem .7rem; border-radius: .6rem; border-left: 2px solid transparent; color: var(--amber-300); }
+  .nav-action:hover { background: var(--ink-800); color: var(--amber-200); text-decoration: none; }
+  .nav-action .nav-id { font-family: var(--font-mono); font-size: .82rem; font-weight: 600; }
+  .nav-action .nav-label { font-size: .75rem; color: var(--neutral-500); }
+  .nav-action:hover .nav-label { color: var(--neutral-300); }
   .panel { min-width: 0; padding: 1.25rem 1.5rem 3rem; }
 
   /* 详情卡片：圆角 + ink-700 边框 + ink-900 底，比页面底色 ink-950 高一层。 */
@@ -249,6 +259,10 @@ export const UI_CSS = `
     .nav-item { border-left: none; border-bottom: 2px solid transparent; white-space: nowrap; }
     .nav-item[aria-current="page"] { border-bottom-color: var(--amber-400); }
     .nav-label { display: none; }
+    /* 窄屏下指标项只留 id，但「添加徽章」保留文字：
+       只剩一个「＋」没人知道它通向哪。 */
+    .nav-action { border-bottom: none; white-space: nowrap; }
+    .nav-action .nav-label { display: inline; }
     .panel { padding: 1rem .9rem 3rem; }
     /* 宽表格自己横向滚动，别把整页撑破（正文因此仍然正常换行）。 */
     main section.card { overflow-x: auto; }
@@ -352,7 +366,7 @@ function renderSidebar(report: StatsReport, selected: string, days: number): str
       label: UI_NAV_LABELS[section.id] ?? '',
     })),
   ];
-  return items
+  const metrics = items
     .map(item => {
       const current = item.id === selected ? ' aria-current="page"' : '';
       const name = item.id === UI_OVERVIEW_ID ? '概览' : item.id;
@@ -361,6 +375,14 @@ function renderSidebar(report: StatsReport, selected: string, days: number): str
         + `<span class="nav-label">${escapeHtml(item.label)}</span></a>`;
     })
     .join('\n');
+
+  // 加徽章是另一个功能，不是指标，所以不复用 .nav-item——
+  // 「侧栏恰好 9 个指标项」那条断言才有意义。
+  return metrics
+    + '\n<div class="nav-sep" role="presentation"></div>'
+    + '\n<a class="nav-action" href="/badge">'
+    + '<span class="nav-id">＋</span>'
+    + '<span class="nav-label">添加徽章</span></a>';
 }
 
 function renderNames(report: StatsReport): string {
