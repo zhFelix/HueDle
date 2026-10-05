@@ -11,3 +11,6 @@ coverage/
 
 # pnpm 的内容寻址存储（可能在仓库根出现，几千个文件）
 .pnpm-store/
+
+# 已决议问题的归档（不是项目文档，活着的问题在 docs/OPEN-QUESTIONS.md）
+docs/resolved/
