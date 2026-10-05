@@ -75,11 +75,17 @@ export function renderTreeItem(item: TreeItem, options: { token?: string } = {})
         + `<input type="hidden" name="draftId" value="${escapeHtml(item.draftId)}">`
         + `<button type="submit" title="从暂存区删除这条草稿">删除</button></form>`
       : '';
+  // 恢复来源必须能认出来：至少在 hover 里说明它来自哪一批，否则用户分不清
+  // 「这是我刚加的」还是「这是从 5 分钟前那个失败批次捞回来的」。
+  const restored =
+    item.restoredFrom !== undefined
+      ? `<span class="item-restored" title="恢复自批次 ${escapeHtml(item.restoredFrom)}（「修改」/「恢复草稿」把该批 spec 放回了暂存区）">↩ 恢复自 ${escapeHtml(item.restoredFrom)}</span>`
+      : '';
   return `<li class="batch-item">
 <span class="item-id">${escapeHtml(item.id)}</span>
 <span class="item-name">${escapeHtml(item.name)}</span>
 <span class="item-family">${escapeHtml(item.family)}</span>
-${failure}${remove}
+${restored}${failure}${remove}
 </li>`;
 }
 
@@ -112,7 +118,7 @@ function renderAwaiting(batch: TreeBatch, token?: string): string {
   return `<div class="batch-awaiting">
 <p class="batch-awaiting-note"><strong>待确认</strong>：干跑没有任何硬错误，只有 ${warnings.length} 条<b>单向蕴含警告</b>。
 单向蕴含是徽章系统的固有性质（越稀有的徽章必然被更宽的徽章包含），<strong>它不阻止写入，也不是失败</strong>；
-工作区仍然零改动。点「继续」才写盘，「修改」则什么都不发生。</p>
+工作区仍然零改动。点「继续」才写盘；点「修改」则把这一批的 spec <b>放回暂存区</b>，可以接着改。</p>
 ${list}
 <div class="batch-actions">
 <form method="post" action="/badge/continue">
@@ -124,9 +130,28 @@ ${hashInput}
 <form method="post" action="/badge/modify">
 <input type="hidden" name="token" value="${escapeHtml(token ?? '')}">
 <input type="hidden" name="runId" value="${escapeHtml(batch.key)}">
-<button type="submit" class="btn-modify">修改（什么都不发生）</button>
+<button type="submit" class="btn-modify" title="把批次 ${escapeHtml(batch.key)} 的 spec 放回暂存区（按 id 去重，不覆盖已有草稿），接着编辑">修改（放回暂存区，接着改）</button>
 </form>
 </div>
+</div>`;
+}
+
+/**
+ * **失败批次**的「恢复草稿」入口。
+ *
+ * 失败正是最想回去改的时候，而回滚后暂存区已经被统一跑清空了——所以失败批次
+ * 也要有同一个恢复机制。**成功批次不画这个入口**（徽章已经进仓库了，恢复草稿
+ * 只会造成困惑）；树模型里 `canRestore` 只对失败批次为真。
+ */
+function renderRestore(batch: TreeBatch, token?: string): string {
+  return `<div class="batch-restore">
+<p class="batch-restore-note">这一批的 spec 还冻结在作业文件里。点「恢复草稿」把它<strong>放回暂存区</strong>，
+<strong>不覆盖</strong>已有草稿（按 id 去重），可以接着改再统一跑。</p>
+<form method="post" action="/badge/modify">
+<input type="hidden" name="token" value="${escapeHtml(token ?? '')}">
+<input type="hidden" name="runId" value="${escapeHtml(batch.key)}">
+<button type="submit" class="btn-restore" title="把批次 ${escapeHtml(batch.key)} 的 spec 放回暂存区（按 id 去重，不覆盖已有草稿）">恢复草稿</button>
+</form>
 </div>`;
 }
 
@@ -145,10 +170,11 @@ export function renderBatchTree(batches: readonly TreeBatch[], options: { token?
       const header = `<summary>${renderBatchIcon(batch)}<span class="batch-title">${escapeHtml(batch.title)}</span>`
         + `<span class="batch-count">${batch.items.length} 条</span></summary>`;
       const open = batch.pending || batch.state === 'failed' || batch.state === 'awaiting' ? ' open' : '';
+      const restore = batch.state === 'failed' && batch.canRestore ? `\n${renderRestore(batch, options.token)}` : '';
       const body =
         batch.state === 'awaiting'
           ? `${renderItems(batch, options.token)}\n${renderAwaiting(batch, options.token)}`
-          : renderItems(batch, options.token);
+          : `${renderItems(batch, options.token)}${restore}`;
       return `<details class="batch batch-${batch.pending ? 'pending' : batch.state}" id="batch-${escapeHtml(batch.key)}"${open}>\n`
         + `${header}\n${body}\n</details>`;
     })

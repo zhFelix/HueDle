@@ -30,9 +30,11 @@ import {
   continuePendingBatch,
   draftFieldsFromForm,
   removeDraft,
+  restoreBatchDrafts,
   runStagedBatch,
   type ContinueStagedOptions,
   type DraftFields,
+  type RestoreResult,
   type RunStagedOptions,
   type StagedDraft,
 } from '../addbadge/staging';
@@ -112,6 +114,11 @@ export interface UiBadgeOptions {
    * **新起一次运行**）。测试可注入以断言 HTTP 层只负责转发。
    */
   continuePending?: (options: ContinueStagedOptions) => SubmitResult;
+  /**
+   * 「修改」/「恢复草稿」：把某个批次的 spec 从作业文件放回暂存区（按 id 去重、
+   * 幂等、不覆盖已有草稿）。默认 {@link restoreBatchDrafts}。
+   */
+  restoreDrafts?: (adminRoot: string, runId: string) => RestoreResult;
   /** 树形列表模型；默认 {@link buildBatchTree}。 */
   readTree?: (adminRoot: string) => TreeBatch[];
   /**
@@ -457,11 +464,17 @@ async function handleBadgeContinue(
 }
 
 /**
- * `POST /badge/modify`：**什么都不发生**。
+ * `POST /badge/modify`：**把该批次的 spec 放回暂存区**，可以接着编辑。
  *
- * 「修改」是「不接受这些警告，回去编辑」的出口：它不跑管道、不抢锁、不写任何文件、
- * 不产生快照，只是把用户送回表单页（表单本来就在同一个页面上）。
- * 刻意保留成一条显式路由（而不是 a 标签），这样「零副作用」是可断言的。
+ * 为什么必须做：统一跑会清空暂存区，而「修改」的承诺就是「不接受这些警告，
+ * 回去接着改刚刚那几条」。以前它什么都没做，用户得把刚提交的重新打一遍。
+ *
+ * 恢复的边界（都在 {@link restoreBatchDrafts} 里）：
+ *   - 只读**作业文件**（`jobs/<runId>.json` 里冻结的原始 spec），不跑管道、不抢锁、
+ *     不写仓库、不产生快照；
+ *   - **不覆盖已有草稿**：按 id 去重，只追加缺的；
+ *   - **幂等**：没有新增时一个字节都不写；
+ *   - 每条带 `restoredFrom`，树里 hover 能看出它来自哪一批。
  */
 async function handleBadgeModify(
   badge: UiBadgeOptions,
@@ -471,8 +484,25 @@ async function handleBadgeModify(
 ): Promise<void> {
   const fields = await readAuthorizedForm(token, req, res);
   if (!fields) return;
-  void badge;
-  redirect(res, '/badge?modified=1');
+  const runId = fields.get('runId') ?? '';
+  const restore = badge.restoreDrafts ?? restoreBatchDrafts;
+  let result: RestoreResult;
+  try {
+    result = restore(badge.adminRoot, runId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    redirect(res, `/badge?error=${encodeURIComponent(`恢复草稿失败：${message}`)}`);
+    return;
+  }
+  if (!result.ok) {
+    redirect(res, `/badge?error=${encodeURIComponent(result.reason ?? '恢复草稿失败')}`);
+    return;
+  }
+  // 没有新增（作业文件不在了 / 草稿都已在暂存区）时保持 location 就是 `?modified=1`。
+  const suffix = result.restored > 0
+    ? `&restored=${result.restored}&from=${encodeURIComponent(result.runId)}`
+    : '';
+  redirect(res, `/badge?modified=1${suffix}`);
 }
 
 /** 303：POST 之后回到表单页（PRG，避免刷新重复提交）。 */
@@ -556,6 +586,8 @@ async function handleRequest(
     const deleted = url.searchParams.get('deleted');
     const continued = url.searchParams.get('continued');
     const modified = url.searchParams.get('modified');
+    const restoredCount = url.searchParams.get('restored');
+    const restoredFrom = url.searchParams.get('from');
     const message = error
       ? `提交被拒绝：${error}`
       : submitted
@@ -567,7 +599,10 @@ async function handleRequest(
             : deleted
               ? '已从暂存区删除。'
               : modified
-                ? '已返回编辑状态：未做任何改动（仓库零改动、无快照）。'
+                ? restoredCount
+                  ? `已「修改」：把批次 ${restoredFrom ?? ''} 的 ${restoredCount} 条 spec 放回了暂存区`
+                    + '（不覆盖已有草稿、按 id 去重），可以接着改。仓库零改动、无快照。'
+                  : '已返回编辑状态：该批次没有可放回暂存区的 spec（作业文件不在或草稿都已在暂存区）。'
                 : undefined;
     send(
       res,

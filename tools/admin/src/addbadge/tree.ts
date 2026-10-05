@@ -14,7 +14,7 @@
  * 页面渲染在 `ui/batch-tree.ts`；本文件只产出数据（纯读，绝不执行东西）。
  */
 import { readBatches } from './history';
-import { readStaging } from './staging';
+import { hasRestorableSpecs, readStaging } from './staging';
 import { readStatus, type FailureAttribution, type PipelineState, type StatusWarning } from './state';
 
 /**
@@ -36,6 +36,8 @@ export interface TreeItem {
   failReason?: string;
   /** 待运行批次才有：草稿身份（删除用）。 */
   draftId?: string;
+  /** 待运行批次才有：这条草稿是从哪一批恢复回来的（hover 里说明来源）。 */
+  restoredFrom?: string;
 }
 
 export interface TreeBatch {
@@ -57,6 +59,11 @@ export interface TreeBatch {
   items: TreeItem[];
   /** 是否是「当前正在攒的这一批」。 */
   pending: boolean;
+  /**
+   * **失败批次**才可能为真：该批次的作业文件还在，可以把 spec 恢复回暂存区
+   * （按钮文案「恢复草稿」）。成功批次**永远**没有这个入口。
+   */
+  canRestore?: boolean;
 }
 
 /** pipeline 状态 → 图标五态。 */
@@ -110,6 +117,7 @@ export function buildBatchTree(adminRoot: string, now: Date = new Date()): TreeB
         family: draft.fields.family || '（未选 family）',
         failed: false,
         draftId: draft.draftId,
+        ...(draft.restoredFrom ? { restoredFrom: draft.restoredFrom } : {}),
       })),
       pending: true,
     });
@@ -163,6 +171,9 @@ export function buildBatchTree(adminRoot: string, now: Date = new Date()): TreeB
         };
       }),
       pending: false,
+      // 只有**失败**批次（不是成功批次）才给「恢复草稿」入口，且要求作业文件里
+      // 确实还冻结着 spec（否则按钮点了也只能报「没有可恢复的」）。
+      ...(state === 'failed' && hasRestorableSpecs(adminRoot, record.runId) ? { canRestore: true } : {}),
     });
   }
   return batches;

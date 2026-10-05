@@ -20,7 +20,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
-import { ADD_BADGE_OUT_DIR, ensureOutDirs, readStatus } from './state';
+import { ADD_BADGE_OUT_DIR, addBadgePaths, ensureOutDirs, readStatus } from './state';
 import { SpecError, parseBadgeSpec, type BadgeSpec } from './spec';
 import { makeBatchRunId, makeRunId, submitBadgeBatchJob, submitBadgeJob, type SpawnFn, type SubmitResult } from './submit';
 import { recordBatchSubmitted } from './history';
@@ -47,6 +47,13 @@ export interface StagedDraft {
   draftId: string;
   addedAt: string;
   fields: DraftFields;
+  /**
+   * 这条草稿是从哪一批**恢复**回来的（`/badge/modify`「修改」或失败批次的「恢复草稿」）。
+   *
+   * 缺省 = 用户手动新增。UI 至少在 hover 里显示它，用户才能分清「这是我刚加的」
+   * 还是「这是从 5 分钟前那个失败批次捞回来的」。
+   */
+  restoredFrom?: string;
 }
 
 export function stagingFile(adminRoot: string): string {
@@ -129,6 +136,183 @@ export function removeDraft(adminRoot: string, draftId: string): boolean {
 /** 清空暂存区（统一跑成功之后调用；失败/被拒时**保留**，草稿不丢）。 */
 export function clearStaging(adminRoot: string): void {
   writeStaging(adminRoot, []);
+}
+
+// ───────────────────────── 恢复：把批次的 spec 放回暂存区 ─────────────────────────
+
+/**
+ * runId 必须是安全的文件名片段。
+ *
+ * runId 来自表单，会被拼进 `jobs/<runId>.json`——不做校验就等于开了一条
+ * `../../` 读任意 `.json` 的路径。生成器（`makeRunId` / `makeBatchRunId`）只会
+ * 产出这个字符集，所以拒绝其它输入不影响任何合法批次。
+ */
+export function isSafeRunId(runId: string): boolean {
+  return /^[A-Za-z0-9TZ._-]+$/.test(runId);
+}
+
+/** 某个批次的作业文件路径（**只算路径，不读不建目录**）。 */
+export function batchJobFile(adminRoot: string, runId: string): string {
+  return join(addBadgePaths(adminRoot).jobsDir, `${runId}.json`);
+}
+
+interface ChildJobSpecs {
+  spec?: unknown;
+  specs?: unknown[];
+}
+
+/**
+ * 读回作业文件里**冻结的原始 spec**（`out/addbadge/jobs/<runId>.json`）。
+ *
+ * 这是恢复的唯一数据源：批次历史（`batches.json`）只存 id/name/family 这类元数据，
+ * spec 内容从来不在那里。作业文件在提交时写入、**从不删除**，因此待确认批次与
+ * 失败批次的 spec 都还在。
+ *
+ * 返回 `null` 表示「读不到」（文件不存在/损坏/runId 非法），与「读到了但是空数组」区分。
+ */
+function readJobSpecs(adminRoot: string, runId: string): unknown[] | null {
+  if (!isSafeRunId(runId)) return null;
+  const path = batchJobFile(adminRoot, runId);
+  if (!existsSync(path)) return null;
+  try {
+    const payload = JSON.parse(readFileSync(path, 'utf8')) as ChildJobSpecs;
+    if (Array.isArray(payload.specs)) return payload.specs;
+    if (payload.spec !== undefined) return [payload.spec];
+    return [];
+  } catch {
+    return null;
+  }
+}
+
+/** 该批次是否还有可恢复的冻结 spec（树形列表据此决定要不要画「恢复草稿」入口）。 */
+export function hasRestorableSpecs(adminRoot: string, runId: string): boolean {
+  const specs = readJobSpecs(adminRoot, runId);
+  return specs !== null && specs.length > 0;
+}
+
+/**
+ * 把作业文件里冻结的原始 spec 反翻译回**表单草稿字段**。
+ *
+ * 与 {@link draftToRawSpec} 互为逆：`when` 走 `JSON.stringify`，`handwritten` 的
+ * `evalHelpers` 同理。反翻译出来的字符串再喂给 {@link draftToRawSpec} 会得到等价的
+ * 原始 spec（`group: null` ↔ `group: ''` 是唯一的规范化差异，两份都合法）。
+ */
+export function draftFieldsFromRawSpec(raw: unknown): DraftFields {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new SpecError('作业文件里的 spec 不是对象，无法恢复成草稿', 'spec');
+  }
+  const spec = raw as Record<string, unknown>;
+  const text = (value: unknown): string => (value === undefined || value === null ? '' : String(value));
+  const base = {
+    id: text(spec.id),
+    name: text(spec.name),
+    description: text(spec.description),
+    family: text(spec.family),
+    group: spec.group === undefined || spec.group === null ? '' : String(spec.group),
+  };
+  const handwritten = spec.handwritten;
+  if (handwritten !== null && typeof handwritten === 'object') {
+    const h = handwritten as Record<string, unknown>;
+    return {
+      ...base,
+      mode: 'handwritten',
+      when: '',
+      check: text(h.check),
+      evalHelpers: h.evalHelpers === undefined ? '' : JSON.stringify(h.evalHelpers),
+    };
+  }
+  if (spec.when === undefined) {
+    throw new SpecError('作业文件里的 spec 既没有 when 也没有 handwritten，无法恢复成草稿', 'spec');
+  }
+  return { ...base, mode: 'when', when: JSON.stringify(spec.when), check: '', evalHelpers: '' };
+}
+
+export interface RestoreResult {
+  ok: boolean;
+  runId: string;
+  /** 本次真正放回暂存区的条数。 */
+  restored: number;
+  /** 因为 id 已经在暂存区里而**跳过**（不覆盖已有草稿）的条数。 */
+  skipped: number;
+  reason?: string;
+}
+
+export interface RestoreOptions {
+  now?: () => Date;
+}
+
+/**
+ * **恢复**：把某个批次的 spec 从作业文件放回暂存区，可以接着编辑。
+ *
+ * 三条性质（对应任务要求）：
+ *   - **不覆盖已有草稿**：按 id 去重——暂存区里已有同 id 的（不管是用户刚加的，
+ *     还是上次恢复留下的）一律跳过，只追加缺的那几条；
+ *   - **幂等**：没有新增时**一个字节都不写**，连点两次不会变成两份、也不会重排草稿；
+ *   - **可追溯**：每条恢复的草稿带 `restoredFrom = runId`，UI 在 hover 里显示。
+ *
+ * 作业文件不存在/损坏时返回 `ok: true, restored: 0`（「没有可恢复的东西」不是
+ * 一次失败的编辑操作，页面照常回到编辑状态）；只有 runId 非法或 spec 无法反翻译
+ * 才是 `ok: false`。
+ */
+export function restoreBatchDrafts(
+  adminRoot: string,
+  runId: string,
+  options: RestoreOptions = {},
+): RestoreResult {
+  if (!isSafeRunId(runId)) {
+    return { ok: false, runId, restored: 0, skipped: 0, reason: `批次号不合法：${JSON.stringify(runId)}` };
+  }
+  const rawSpecs = readJobSpecs(adminRoot, runId);
+  if (rawSpecs === null) {
+    return {
+      ok: true,
+      runId,
+      restored: 0,
+      skipped: 0,
+      reason: `找不到批次 ${runId} 的作业文件（spec 已不可恢复）。`,
+    };
+  }
+  if (rawSpecs.length === 0) {
+    return { ok: true, runId, restored: 0, skipped: 0, reason: `批次 ${runId} 的作业文件里没有 spec。` };
+  }
+
+  const fieldsList: DraftFields[] = [];
+  for (const [index, raw] of rawSpecs.entries()) {
+    try {
+      fieldsList.push(draftFieldsFromRawSpec(raw));
+    } catch (err) {
+      return {
+        ok: false,
+        runId,
+        restored: 0,
+        skipped: 0,
+        reason: `批次 ${runId} 的第 ${index + 1} 条 spec 无法恢复为草稿：${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  const existing = readStaging(adminRoot);
+  const takenIds = new Set(existing.map(draft => draft.fields.id).filter(id => id.length > 0));
+  const now = options.now?.() ?? new Date();
+  const added: StagedDraft[] = [];
+  let skipped = 0;
+  for (const fields of fieldsList) {
+    if (fields.id.length > 0 && takenIds.has(fields.id)) {
+      skipped += 1;
+      continue;
+    }
+    if (fields.id.length > 0) takenIds.add(fields.id);
+    added.push({
+      draftId: newDraftId(now),
+      addedAt: now.toISOString(),
+      fields,
+      restoredFrom: runId,
+    });
+  }
+
+  // 幂等：没有新增就不写文件（连点两次不会变成两份，也不会重排已有草稿）。
+  if (added.length > 0) writeStaging(adminRoot, [...existing, ...added]);
+  return { ok: true, runId, restored: added.length, skipped };
 }
 
 /**

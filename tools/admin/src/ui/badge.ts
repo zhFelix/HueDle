@@ -197,6 +197,13 @@ export function renderBadgePage(options: BadgePageOptions): string {
   .batch-actions .btn-continue:hover { background: var(--amber-200); }
   .batch-actions .btn-modify { background: var(--ink-800); color: var(--neutral-200); border: 1px solid var(--ink-700); }
   .batch-actions .btn-modify:hover { color: var(--neutral-100); }
+  /* ── 恢复来源标记 + 失败批次的恢复入口 ── */
+  .item-restored { color: var(--amber-300); font-size: .72rem; }
+  .batch-restore { margin: 0 .75rem .7rem 2.4rem; border-left: 3px solid var(--ink-700); padding: .5rem .7rem; background: var(--ink-950); border-radius: .4rem; }
+  .batch-restore-note { color: var(--neutral-400); font-size: .78rem; margin: 0 0 .5rem; line-height: 1.5; }
+  .batch-restore-note strong { color: var(--neutral-200); }
+  .batch-restore button { background: var(--ink-800); color: var(--amber-300); border: 1px solid var(--amber-400); border-radius: 9999px; padding: .35rem 1.05rem; font-weight: 700; cursor: pointer; }
+  .batch-restore button:hover { background: var(--ink-700); }
 </style>
 </head>
 <body>
