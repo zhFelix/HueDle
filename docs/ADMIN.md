@@ -25,12 +25,12 @@
 
 | # | 事实 | 来源 |
 |---|---|---|
-| F1 | 徽章共 **128** 条、10 个家族。`check` 形态实测：**70 条**是「单表达式且只用 `helpers.ts` + `ColorInfo` 字段/字面量」，**34 条**是「单表达式但引用了本文件私有 helper」，**24 条**是「多语句块体」。34 条里：`onRanks` 11、`exactHex` 10、`spread` 5、`allCharsIn` 3、`hasTripleRun` 2、`allCharsDistinct` 1、`countDigit` 1、`fullChannelCount` 1 | 对 `packages/shared/src/badges/*.ts` 逐对象解析统计（见 §3.2 的覆盖率论证） |
+| F1 | 徽章条数与家族数以 [BADGES.md](./BADGES.md) 为准（不在此写死）。对**审计当时的 128 条**做 `check` 形态实测：**70 条**是「单表达式且只用 `helpers.ts` + `ColorInfo` 字段/字面量」，**34 条**是「单表达式但引用了本文件私有 helper」，**24 条**是「多语句块体」。34 条里：`onRanks` 11、`exactHex` 10、`spread` 5、`allCharsIn` 3、`hasTripleRun` 2、`allCharsDistinct` 1、`countDigit` 1、`fullChannelCount` 1 | 对 `packages/shared/src/badges/*.ts` 逐对象解析统计（见 §3.2 的覆盖率论证） |
 | F2 | `enumerate` **先写盘、后断言**：`pricing.gen.ts` 写于第 419 行、`docs/research/PRICING-CURRENT.md` 写于第 815 行，而硬断言在 844–875 行（`sameEpViolations===0`、`monotonicityViolations===0`、`bucketsSelfConsistent===true`、`minAtomCount>0`、`emptyBadges===[]`） | `packages/shared/scripts/enumerate.test.ts` |
 | F3 | 默认测试套件只含 `src/**/*.test.ts`（秒级）；枚举在 `scripts/**`，用自己的配置与 15 分钟超时，**不会**拖慢 `pnpm test` | `packages/shared/vitest.config.ts`、`vitest.enumerate.config.ts`、`package.json` scripts |
 | F4 | `docs/BADGES.md` 由 `pnpm run docs`（`UPDATE_DOCS=1`）生成，`docs.test.ts` 与磁盘文件**逐字节**比较 —— 改了徽章不跑 `docs`，测试必红 | `packages/shared/src/badges/__tests__/docs.test.ts` |
 | F5 | `supersession` 只写 `docs/research/SUPERSESSION-AUDIT.md`，**不失败、不改代码**；「100% 被取代」是必须人读的结论 | `packages/shared/scripts/supersession.test.ts` 文件头 |
-| F6 | **每个家族文件里都恰好有一条对象是 4 空格缩进**（其余 2 空格） | `gray.ts:60`、`casino.ts:198`、`channel.ts:62`、`culture.ts:68`、`extreme.ts:60`、`lucky.ts:76`、`math.ts:101`、`pattern.ts:112`、`perception.ts:65`、`pure.ts:55` |
+| F6 | **每个家族文件里都恰好有一条对象是 4 空格缩进**（其余 2 空格） | 审计当时 10 个家族文件：`gray.ts:60`、`casino.ts:198`、`channel.ts:62`、`culture.ts:68`、`extreme.ts:60`、`lucky.ts:76`、`math.ts:101`、`pattern.ts:112`、`perception.ts:65`、`pure.ts:55` |
 | F7 | `typescript@7.0.2` 是**原生端口**：包内**没有** `lib/typescript.js`，只有 `bin/tsc`、`lib/tsc.js`、`dist/api/sync`（`unstable`）。**进程内没有官方 TS 编译器 API**，写盘前无法用 `ts.createSourceFile` 校验语法 | `packages/shared/node_modules/typescript/package.json` 的 `exports`/`files` + 实测 `import ts from 'typescript'` 失败 |
 | F8 | `pg`、`tsx`、`@huedle/shared` 已在 `apps/api` 的依赖里；`@huedle/shared` 亦在 `apps/web`。**不需要任何新的外部包** | `apps/api/package.json`、`packages/shared/package.json` |
 | F9 | `process.loadEnvFile()` 是本仓库既定的读 `.env` 方式（不引 dotenv），Dockerfile 也以它解释为何锁 Node 24 | `apps/api/src/lib/env.ts:17`、`Dockerfile` |
@@ -334,7 +334,7 @@ toPredicate(spec): (c: ColorInfo) => boolean   // 编译成可执行的 JS 闭�
 | 同上前提但归约不了（`onRanks` 11） | 11 | ❌ 需要六字符频次/顺子语义 |
 | 多语句块体（casino 5、pattern 10、math 5、extreme 2、channel 1、culture 1） | 24 | ❌ 需要局部 helper 与循环 |
 
-即：**词汇表合理的构造器覆盖约 93/128 ≈ 73%，剩下约 35 条（27%）表达不了。**
+即（对**审计当时的 128 条**）：**词汇表合理的构造器覆盖约 93/128 ≈ 73%，剩下约 35 条（27%）表达不了。**
 
 **结论：构造器是常用路径，不是唯一路径。** 剩下 27% 的正确做法就是**在家族文件里手写 3–10 行本地 helper**（`casino.ts` / `pattern.ts` 现在就是这么做的）。工具对这部分的价值不是「生成逻辑」，而是「**插入位置 + 格式一致 + 全色域验证 + 回滚**」。
 把 27% 硬塞进构造器（例如做「筹码顺子」的专用表单）会让工具长成一个半吊子 DSL——列为非目标。
@@ -359,7 +359,7 @@ toPredicate(spec): (c: ColorInfo) => boolean   // 编译成可执行的 JS 闭�
 | 插入点 | 数组**末尾**，即最后一个 `\n];\n` 之前 | 末尾插入是最小 diff（不移动任何既有行）；且 `defs.ts` 的拼接顺序决定图鉴与 `BADGES.md` 的顺序，新徽章稳定地出现在家族最后 |
 | 缩进模板 | **同文件中最后一个已存在对象的前导空白**（从原文提取），不是硬编码 2 空格 | F6：每个家族文件里恰好有一条是 4 空格。硬编码 2 会与相邻行不一致；用「末元素模板」保证局部一致 |
 | `check` 折行 | 整行 ≤ 100 字符 → 一行 `check: c => <expr>,`；否则按现有风格折成 `check: c =>\n<indent+2><expr>,` | 与 `gray.ts:23` / `math.ts` 现有两种写法一致 |
-| 尾随逗号 | 必须有 | 现有 128 条全部有 |
+| 尾随逗号 | 必须有 | 全部既有条目均有（条数不在此写死，见 [BADGES.md](./BADGES.md)） |
 | 文本操作 | **纯插入**：要求 `\n];\n` 匹配唯一，否则拒绝（不猜测、不用正则去修格式） | 不做 AST 重排、不跑格式化器（F15：仓库没有 prettier/eslint 配置） |
 | 写盘后自检 | `原文 + 新增块 === 新文件内容`（字节级）、文件仍以 `];\n` 结尾、`id: '<id>'` 出现次数恰好 +1 | 三道自检任一失败 → 立即回滚 |
 
@@ -533,7 +533,7 @@ toPredicate(spec): (c: ColorInfo) => boolean   // 编译成可执行的 JS 闭�
 | 对象 | 为什么 |
 |---|---|
 | 真连库 + `BEGIN READ ONLY` **真的拒绝写入** | 必须断言一条 `INSERT` 真的抛 SQLSTATE `25006`。「只读」不能靠读代码相信 |
-| 干跑的正确性 | 对**全部 128 条既有徽章**跑干跑，`hits` 必须与 `pricing.gen.ts` 逐条相等（这是干跑循环与枚举器同口径的黄金证明） |
+| 干跑的正确性 | 对**全部既有徽章**跑干跑，`hits` 必须与 `pricing.gen.ts` 逐条相等（这是干跑循环与枚举器同口径的黄金证明） |
 | 完整加徽章流程 | 写盘 → typecheck → enumerate → docs → supersession → test → md5 幂等，必须真跑一次（建议在临时 clone 里，见 §7 Q4） |
 | 回滚的真实性 | 故意用 `hits = 0` 的候选跑完整流程，确认工作区字节还原且 `pnpm -C packages/shared test` 全绿。这是回滚代码**唯一**的验证方式 |
 | 不回归 | `pnpm -C packages/shared test`（177 例）与 `pnpm -C apps/api test`（60 例）保持全绿 |
@@ -582,7 +582,7 @@ toPredicate(spec): (c: ColorInfo) => boolean   // 编译成可执行的 JS 闭�
 |---|---|---|---|
 | **Q1** | **CLI 还是 Web？** 用户说的是「管理后台」，我判成 CLI + 静态 HTML 报告 | **CLI**（理由见 §1.2；核心是认证面与写盘前干跑） | 若真做 Web，就欠下 §1.5 那一整节否定性约束；若判错，非技术使用者用不了这个工具 |
 | **Q2** | **新 workspace 包带来的 `pnpm-lock.yaml` importer 变更可接受吗？** | **可接受**（零新外部包，只有新 importer）。不可接受就走 `apps/api/tools/**`，但要接受 §4.4 的两个后果 | 选错会让「不引入依赖」这条约束被认定违反，或让工具落在被部署的包内 |
-| **Q3** | **`--ts` 逃生舱留不留？** | **留**，默认关闭且需显式 flag。砍掉它也不会挡住任何徽章（那 27% 本来就要手写），只是少一条便利路径 | 砍掉后有人会绕过工具直接手改文件，反而失去验证与回滚 |
+| **Q3** | **`--ts` 逃生舱留不留？** | **留**，默认关闭且需显式 flag。砍掉它也不会挡住任何徽章（审计当时实测的那 27% 本来就要手写），只是少一条便利路径 | 砍掉后有人会绕过工具直接手改文件，反而失去验证与回滚 |
 | **Q4** | **完整流程的验收要不要在临时 clone 里跑？** | **要**（避免污染工作区）。代价：临时 clone 要再 `pnpm install` 一次（需要网络/缓存） | 直接在主工作区跑，失败回滚即是验收；但验收本身会成为一次真实的风险操作 |
 | **Q5** | **类型 B 失败（分位档位不自洽）回滚还是保留现场？** | **保留现场**（§3.4）。这是流程决定，不是技术决定 | 自动回滚会删掉复核材料；保留则工作区会脏，需要人接手 |
 | **Q6** | **`docs/badges/<family>.md`（家族备注，如 `gray.md`）要不要一起更新？** `gray.ts` 顶部注释明确指向它，但 `ADD-BADGE.md` 的清单没提 | **按现状不更新**，只在工具输出里提醒一次「若本家族有备注文件，请人工同步」 | 家族备注会与新增徽章漂移（现有文档已经有过期内容的前科） |
@@ -593,7 +593,7 @@ toPredicate(spec): (c: ColorInfo) => boolean   // 编译成可执行的 JS 闭�
 
 ### 非目标（明确列出，防止范围蔓延）
 
-不做：任何形式的认证/角色/账户；任何写数据库的能力；用户管理（改密码、删用户、清会话）；徽章改名或删除的自动化；把 27% 的复杂 `check`（casino 顺子、pattern 结构）塞进条件构造器；图表库；定时任务；Web 服务（默认）；自动 commit/push。
+不做：任何形式的认证/角色/账户；任何写数据库的能力；用户管理（改密码、删用户、清会话）；徽章改名或删除的自动化；把复杂 `check`（casino 顺子、pattern 结构；审计当时约占 27%）塞进条件构造器；图表库；定时任务；Web 服务（默认）；自动 commit/push。
 
 ---
 

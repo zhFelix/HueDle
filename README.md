@@ -54,7 +54,7 @@ ep = 100 / p                 # 该徽章的 CP
 ## 仓库结构
 
 ```
-packages/shared/   前后端共享：类型、颜色转换、种子、128 条徽章、计分
+packages/shared/   前后端共享：类型、颜色转换、种子、徽章表、计分
 apps/web/          Vue 3 + Vite + Tailwind v4 + Pinia
 apps/api/          Hono + PostgreSQL
 docs/              设计文档与验证报告
@@ -270,7 +270,7 @@ document.querySelector('script[src]').src
 | [docs/DESIGN.md](docs/DESIGN.md) | 主设计文档：双模式、计分、接口、数据库、本地存储 |
 | [docs/BADGE-SPEC.md](docs/BADGE-SPEC.md) | 徽章作者契约：类型、可用 API、反冗余、`group` 取代组 |
 | [docs/PRICING-SPEC.md](docs/PRICING-SPEC.md) | 概率定价：`ep = 100/p`、两套稀有度阶梯 |
-| [docs/BADGES.md](docs/BADGES.md) | 128 条徽章总表（**自动生成，勿手改**） |
+| [docs/BADGES.md](docs/BADGES.md) | 徽章总表（**自动生成，勿手改**；条数以表内「徽章总数」为准） |
 | [docs/research/](docs/research/) | RNGdle 机制研究、取代审计、定价迁移报告 |
 
 ## 开发约束

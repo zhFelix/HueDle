@@ -40,7 +40,7 @@ export function isFamily(value: unknown): value is Family {
  * 结构化条件可用的 helper（来自 `helpers.ts`，签名已冻结）。
  *
  * value = 参数个数。**刻意不包含文件私有 helper**（`spread` / `onRanks` /
- * `allCharsIn` …）：它们不在冻结词汇表里，属于手写路径的范畴——把 27% 的复杂形态
+ * `allCharsIn` …）：它们不在冻结词汇表里，属于手写路径的范畴——把当时约占 27% 的复杂形态
  * 硬塞进构造器会让工具长成一个半吊子 DSL（docs/ADMIN.md §3.2(b) 的结论）。
  */
 export const HELPER_ARITY: Readonly<Record<string, number>> = {

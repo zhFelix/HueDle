@@ -1,7 +1,7 @@
 /**
  * 徽章图鉴的数据层：把 `useHistory()` 的存档换算成「已收集 / 未收集」。
  *
- * ── 设计判断：76 条全部出现，但未获得的只显示名称 ───────────────────────────
+ * ── 设计判断：全部徽章都出现，但未获得的只显示名称 ─────────────────────────
  *
  * 未获得的徽章只显示名称，保留「发现」的乐趣——玩家知道还有多少没集齐
  * （家族进度仍然展示），但不知道具体要满足什么条件，抽到的时候才有惊喜。
@@ -63,7 +63,7 @@ export function useBadges(): UseBadges {
    *
    * 刻意不做取代过滤：被 `group` 取代的徽章也在这份集合里（见文件头说明）。
    * 不认识的 id（旧存档 / 脏数据）也收进来，`isCollected` 会如实回答 true——
-   * 但计数只走 `allBadges`，所以不可能超过 76。
+   * 但计数只走 `allBadges`，所以不可能超过 `allBadges.length`（`totalCount`）。
    */
   const collectedIds = computed<ReadonlySet<string>>(() => {
     const ids = new Set<string>();

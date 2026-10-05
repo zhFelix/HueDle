@@ -29,6 +29,11 @@ declare module 'node:fs' {
   export function existsSync(path: string): boolean;
   /** 目录项名（不保证顺序；调用方必须自行排序——`badgeSourceFingerprint.ts` 会 sort）。 */
   export function readdirSync(path: string): string[];
+  /** 只声明判断目录所需的部分（`__tests__/noStaleBadgeCount.test.ts` 递归扫描用）。 */
+  export interface Stats {
+    isDirectory(): boolean;
+  }
+  export function statSync(path: string): Stats;
 }
 
 declare module 'node:crypto' {

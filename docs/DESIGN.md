@@ -144,7 +144,7 @@ huedle/
 │        └─ badges/
 │           ├─ helpers.ts
 │           ├─ index.ts
-│           └─ <family>.ts      # 9 个家族
+│           └─ <family>.ts      # 家族文件（gray…casino，每族一个）
 ├─ docs/
 │  ├─ DESIGN.md                 # 本文件
 │  ├─ BADGE-SPEC.md             # 徽章实现契约

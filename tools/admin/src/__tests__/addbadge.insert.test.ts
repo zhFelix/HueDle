@@ -59,7 +59,7 @@ describe('测试 2：对每个真实家族文件的字节级插入', () => {
     const matches = [...before.matchAll(/\n([ \t]*)\{\n/g)];
     const last = matches[matches.length - 1]![1]!;
     expect(lastElementIndent(content, anchor)).toBe(last);
-    // 现有 128 条里只有 2 空格与 4 空格两种缩进
+    // 既有家族文件里只用这两种缩进（4 空格是 F6 的那一条）
     expect(['  ', '    ']).toContain(last);
   });
 

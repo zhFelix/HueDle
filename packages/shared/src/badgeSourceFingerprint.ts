@@ -28,7 +28,7 @@
  * - 文件：该目录下**直接**的 `*.ts`，按文件名升序（`sort`），每个文件先写文件名、再写内容；
  *   - 排除 `*.test.ts`（测试不是 `check` 的实现，改测试不该触发重跑枚举）；
  *   - 排除 `index.ts` / `defs.ts` / `renderDoc.ts`（组装与文档渲染，不参与任何 `check`）；
- *   - **包含 10 个家族文件 + `helpers.ts`**（见下）。
+ *   - **包含 `badges/` 下全部家族文件 + `helpers.ts`**（见下）。
  * - 内容：先剔除 `name` / `description` 文案（见 {@link stripNonInfluentialText}），再入哈希。
  *   理由：这两个字段不进 `check`、不影响 `hits`，而项目已确立「改文案不用重跑枚举」。
  *

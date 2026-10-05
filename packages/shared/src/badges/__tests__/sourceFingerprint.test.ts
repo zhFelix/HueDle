@@ -21,20 +21,16 @@ import {
   stripNonInfluentialText,
 } from '../../badgeSourceFingerprint';
 import { SOURCE_FINGERPRINT } from '../../pricing.gen';
+import { allBadgeDefs } from '../defs';
 
-/** 10 个家族文件（家族顺序见 `badges/index.ts` 头注释）。 */
-const FAMILY_FILES = [
-  'gray.ts',
-  'extreme.ts',
-  'pure.ts',
-  'channel.ts',
-  'math.ts',
-  'perception.ts',
-  'pattern.ts',
-  'culture.ts',
-  'lucky.ts',
-  'casino.ts',
-];
+/**
+ * 期望被指纹覆盖的家族文件，**从徽章表推导**（`def.family` 与文件名一致，这是
+ * `ADD-BADGE.md` 的字段约束，也由既有测试锁着）。不写死名单——新增家族时这里
+ * 自动跟随，漏收某个家族文件会让下面的集合相等断言变红。
+ */
+const FAMILY_FILES = [...new Set(allBadgeDefs.map(def => def.family))]
+  .map(family => `${family}.ts`)
+  .sort();
 
 /** 把源码里的实现改一个字符，用来证明指纹对实现敏感。 */
 function mutateImplementation(text: string): string {
@@ -69,9 +65,10 @@ describe('徽章源码指纹 → pricing.gen.ts 新鲜度', () => {
     expect(current, FINGERPRINT_STALE_MESSAGE).toBe(SOURCE_FINGERPRINT);
   });
 
-  it('覆盖 10 个家族文件 + helpers.ts；排除组装文件、文档渲染与测试', () => {
+  it('覆盖全部家族文件 + helpers.ts；排除组装文件、文档渲染与测试', () => {
     const files = listFingerprintedBadgeFiles();
-    for (const family of FAMILY_FILES) expect(files).toContain(family);
+    // 集合相等（不只是「包含」）：漏收某个家族文件、或把不该收的文件收进来，都会红。
+    expect([...files].sort()).toEqual([...FAMILY_FILES, 'helpers.ts'].sort());
     expect(files).toContain('helpers.ts');
     // helpers.ts 是所有家族共用的判定函数库，改它确实会改 hits → 必须在指纹内。
     expect(files).not.toContain('index.ts');

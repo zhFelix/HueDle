@@ -156,7 +156,7 @@ isGray  hexBytes  toHexByte
 
 ### 手写路径：引用家族文件里的 private helper
 
-当判定逻辑复杂到 `helpers.ts` 的冻结词汇表装不下时（约 27% 的徽章形态），可以走**手写路径**：
+当判定逻辑复杂到 `helpers.ts` 的冻结词汇表装不下时（审计当时实测约 27% 的徽章形态），可以走**手写路径**：
 `check` 写成一段**单表达式**，直接引用目标家族文件里已有的 private helper（`const` 箭头函数）。
 
 ```jsonc

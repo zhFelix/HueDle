@@ -56,8 +56,8 @@ export function useBadgeDetail(): UseBadgeDetail {
   /**
    * 按 id 缓存的详情。
    *
-   * 不加缓存的话，每次展开某条徽章都要扫一遍全部历史（一年 365 天 = 365 次
-   * `badgeIds.includes`），128 条全展开就是 4.7 万次。缓存以**历史数组的引用**
+   * 不加缓存的话，每次展开某条徽章都要扫一遍全部历史（天数 × `badgeIds.includes`），
+   * 全部徽章展开就是数万次。缓存以**历史数组的引用**
    * 为失效条件：`reload()` 会换一个新数组，缓存随之整体作废，不会读到陈旧数据。
    */
   let cacheSource: HistoryItem[] | null = null;

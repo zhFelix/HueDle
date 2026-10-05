@@ -30,7 +30,7 @@
 ### 背景（读这一条所需的最小上下文）
 
 **HueDle** 是每日随机颜色收集游戏。徽章是判定函数 `check(color) => boolean`，写在
-`packages/shared/src/badges/<family>.ts`（10 个家族文件，共 128 条）。
+`packages/shared/src/badges/<family>.ts`（每个家族一个文件；条数以 [BADGES.md](./BADGES.md) 为准，不写死）。
 
 每条徽章的命中数 `hits` **不是手写的**——它由**枚举**（遍历全部 2²⁴ 个颜色）算出，
 连同 `ep`、`rarity` 一起写进生成文件 `packages/shared/src/pricing.gen.ts`。
@@ -115,7 +115,7 @@ export const SOURCE_FINGERPRINT = '<sha256 of 全部 check 源码 + family 归�
 
 | 事故 | 发现方式 |
 |---|---|
-| README 写 126 条徽章（实际 128） | 人工 |
+| README 写 126 条徽章（当时实际 128） | 人工 |
 | `pricing.gen.ts` 留下孤儿条目 `extreme-404` | 人工，**只差一步被提交** |
 | 生成的家族文档表格与代码不一致 | 人工 |
 
@@ -141,7 +141,7 @@ export const SOURCE_FINGERPRINT = '<sha256 of 全部 check 源码 + family 归�
 而是"写错了但所有测试都是绿的"**：
 
 ```
-README 写 126 条徽章（实际 128）              人工发现
+README 写 126 条徽章（当时实际 128）          人工发现
 pricing.gen.ts 留下孤儿条目 extreme-404       人工发现，只差一步被提交
 最稀有徽章被显示成「1 / 1 = 必然抽中」          人工审设计文档时发现
 ```

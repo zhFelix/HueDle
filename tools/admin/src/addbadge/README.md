@@ -78,8 +78,8 @@ pnpm -C tools/admin run rollback  -- --snapshot <dir>  # 按快照手动回滚
 
 ## 两条路径的地位
 
-- **结构化**（`when`）：覆盖「单表达式且只用 `helpers.ts`」那部分（实测 128 条里 70 条）。
-- **手写**（`handwritten.check` / `--ts`）：27% 的形态（casino 顺子、pattern 结构）表达不了，
+- **结构化**（`when`）：覆盖「单表达式且只用 `helpers.ts`」那部分（审计当时对 128 条实测：其中 70 条）。
+- **手写**（`handwritten.check` / `--ts`）：审计当时约占 27% 的形态（casino 顺子、pattern 结构）表达不了，
   必须能手写。手写路径不是逃生舱——没有它这个工具就是残的。
   写盘前的干跑需要能执行这段逻辑，于是**直接 `await import` 目标家族文件里的真品**求值
   （工具本身跑在 `tsx` 下）。`evalHelpers` / `--helper` 只给**依赖名字列表**：

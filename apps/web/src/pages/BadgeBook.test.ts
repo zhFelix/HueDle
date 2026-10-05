@@ -3,7 +3,7 @@
  *
  * 只钉两件事，且都断言**真实渲染结果**而不是源码：
  *
- *  1. **76 条全部出现**（未获得的也在占位），且未获得的卡片里
+ *  1. **全部徽章都出现**（未获得的也在占位），且未获得的卡片里
  *     **既没有判定条件、也没有 CP、也没有稀有度胶囊**——只留名称；
  *  2. 已获得的卡片反过来必须**完整**（名称 + 条件 + CP），被取代的徽章也算已获得。
  *
@@ -73,13 +73,15 @@ afterEach(() => {
 });
 
 describe('BadgeBook 页面', () => {
-  it('5. 未收集也出现：渲染 76 条，且未获得的卡片不含条件 / CP / 稀有度', async () => {
+  it('5. 未收集也出现：渲染全部徽章，且未获得的卡片不含条件 / CP / 稀有度', async () => {
     const root = await mountBadgeBook();
 
     // 全部渲染（不是只渲染已收集的）；条数从 shared 取，不写死。
     const items = root.querySelectorAll('[data-testid="badge-item"]');
     expect(items).toHaveLength(allBadges.length);
-    expect(root.querySelectorAll('[data-testid="family-section"]')).toHaveLength(10);
+    // 家族节数同样从徽章表推导（新增家族时这里自动跟随，不写死）。
+    expect(root.querySelectorAll('[data-testid="family-section"]'))
+      .toHaveLength(new Set(allBadges.map(badge => badge.family)).size);
     // 空历史 → 全部未获得。
     expect(root.querySelectorAll('[data-collected="false"]')).toHaveLength(allBadges.length);
 

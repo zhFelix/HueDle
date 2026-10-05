@@ -73,7 +73,7 @@ describe('useBadges', () => {
     expect(totalCollected.value).toBe(0);
     // 交叉断言而非写死：徽章会持续增补，写死的数字只会让每次加徽章都来改测试。
     expect(totalCount.value).toBe(allBadges.length);
-    expect(families.value).toHaveLength(10);
+    expect(families.value).toHaveLength(FAMILY_ORDER.length);
     for (const progress of families.value) {
       expect(progress.collected).toBe(0);
       expect(progress.total).toBeGreaterThan(0);
@@ -81,7 +81,7 @@ describe('useBadges', () => {
   });
 
   // ── ④ 家族分组齐全（与 shared 交叉断言，不写死条数）──────────────────────
-  it('4. 家族分组齐全：10 个家族全出现，顺序固定，每族 total = allBadges 真实条数', () => {
+  it('4. 家族分组齐全：全部家族都出现，顺序固定，每族 total = allBadges 真实条数', () => {
     const { families, badgesByFamily, totalCount } = useBadges();
 
     expect(families.value.map(progress => progress.family)).toEqual([...FAMILY_ORDER]);
