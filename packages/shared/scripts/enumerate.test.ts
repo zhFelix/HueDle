@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { computeBadgeSourceFingerprint } from '../src/badgeSourceFingerprint';
 import { allBadgeDefs } from '../src/badges/defs';
 import { toColorInfo } from '../src/color';
 import {
@@ -358,6 +359,10 @@ describe('全色域枚举 → 定价数据 + 迁移报告', () => {
       }
 
       // ── 输出 pricing.gen.ts（确定性）──────────────────────────
+      // 源码指纹：把「本次生成所依据的 badges/*.ts 文本」一起写进生成文件，
+      // 供默认测试（`src/badges/__tests__/sourceFingerprint.test.ts`）发现
+      // 「改了 check 但没重跑枚举」。只读文件文本，与 tsx / vitest 的加载器无关。
+      const sourceFingerprint = computeBadgeSourceFingerprint();
       const sortedIds = rows.map(r => r.badge.id); // 已按 hits 升序、id 升序
       const byIdSorted = [...sortedIds].sort();
       const rowById = new Map(rows.map(r => [r.badge.id, r]));
@@ -414,6 +419,34 @@ describe('全色域枚举 → 定价数据 + 迁移报告', () => {
       pricingLines.push('/** 生成时的全色域大小，用于校验数据新鲜度。 */');
       pricingLines.push(`export const GENERATED_AT_TOTAL_COLORS = ${N};`);
       pricingLines.push('');
+      pricingLines.push('/**');
+      pricingLines.push(
+        ' * 生成时 `src/badges/*.ts` 文本的 sha256 指纹（含 10 个家族文件与 `helpers.ts`）。',
+      );
+      pricingLines.push(' *');
+      pricingLines.push(
+        ' * **剔除 `name` / `description` 文案**：它们不进 `check`、不影响 `hits`，改文案不必重跑枚举。',
+      );
+      pricingLines.push(
+        ' * 文件名也入哈希（新增 / 删除 / 改名家族文件都会变），文件按路径升序拼接，结果与加载器无关。',
+      );
+      pricingLines.push(' *');
+      pricingLines.push(
+        ' * 默认测试 `src/badges/__tests__/sourceFingerprint.test.ts` 会重算并比对，用来发现',
+      );
+      pricingLines.push(' * 「改了 `check` 但没重跑枚举」。**边界**：只覆盖 `src/badges/` 下直接的 `.ts`');
+      pricingLines.push(
+        ' * （排除 `index.ts` / `defs.ts` / `renderDoc.ts` 与 `*.test.ts`）；`check` 若依赖',
+      );
+      pricingLines.push(
+        ' * `badges/` 之外的文件（如 `../types.ts`、`../color.ts`），其变化**不在**指纹内。',
+      );
+      pricingLines.push(
+        ' * 指纹不判断定价数值对不对，那由流水线的 supersession 阶段覆盖。',
+      );
+      pricingLines.push(' */');
+      pricingLines.push(`export const SOURCE_FINGERPRINT = '${sourceFingerprint}';`);
+      pricingLines.push('');
       const pricingSource = pricingLines.join('\n');
       const pricingMd5 = createHash('md5').update(pricingSource).digest('hex');
       writeFileSync(PRICING_PATH, pricingSource, 'utf8');
@@ -456,6 +489,7 @@ describe('全色域枚举 → 定价数据 + 迁移报告', () => {
       L.push(`- 第二趟（总分）耗时：**${(pass2Ms / 1000).toFixed(2)} s**`);
       L.push(`- 两趟合计：**${((pass1Ms + pass2Ms) / 1000).toFixed(2)} s**`);
       L.push(`- \`src/pricing.gen.ts\` md5：\`${pricingMd5}\``);
+      L.push(`- 徽章源码指纹（sha256）：\`${sourceFingerprint}\``);
       L.push(`- 取代组：${nGroups} 个（${groupNames.map(g => `\`${g}\``).join('、') || '无'}），共 ${
         groupIndex.filter(g => g !== -1).length
       } 条成员`);
@@ -824,6 +858,7 @@ describe('全色域枚举 → 定价数据 + 迁移报告', () => {
           `第二趟 总分     : ${(pass2Ms / 1000).toFixed(2)} s`,
           `合计            : ${((pass1Ms + pass2Ms) / 1000).toFixed(2)} s`,
           `pricing.gen md5 : ${pricingMd5}`,
+          `徽章源码指纹    : ${sourceFingerprint}`,
           `ep 范围         : ${epMin} … ${epMax}`,
           `cp  min/p1/p50/p75/p90/p95/p99/max : ${minScore} / ${quantiles.p1} / ${
             quantiles.p50

@@ -27,6 +27,17 @@ declare module 'node:fs' {
   export function writeFileSync(path: string, data: string, encoding: 'utf8'): void;
   export function mkdirSync(path: string, options: { recursive: boolean }): void;
   export function existsSync(path: string): boolean;
+  /** 目录项名（不保证顺序；调用方必须自行排序——`badgeSourceFingerprint.ts` 会 sort）。 */
+  export function readdirSync(path: string): string[];
+}
+
+declare module 'node:crypto' {
+  /** 只声明本项目用到的流式哈希接口（`src/badgeSourceFingerprint.ts`）。 */
+  export interface Hasher {
+    update(data: string, encoding?: 'utf8'): Hasher;
+    digest(encoding: 'hex'): string;
+  }
+  export function createHash(algorithm: string): Hasher;
 }
 
 declare module 'node:path' {
