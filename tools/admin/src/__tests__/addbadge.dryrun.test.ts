@@ -44,7 +44,7 @@ describe('测试 3：干跑拦住的坏条件', () => {
     expect(result.implications.find(item => item.id === 'gray-black')?.allowed).toBe(false);
   });
 
-  it('旧 ⊆ 新（更宽）同样算蕴含', () => {
+  it('旧 ⊆ 新（更宽）：只算**警告**，不再拒绝（部分包含是徽章系统的固有性质）', () => {
     const result = runDryRun({
       check: c => c.g === 1 || c.b === 0,
       existing,
@@ -52,7 +52,10 @@ describe('测试 3：干跑拦住的坏条件', () => {
     });
     const item = result.implications.find(entry => entry.id === 'casino-pair');
     expect(item?.direction).toBe('old-subset-of-new');
-    expect(result.violations.length).toBeGreaterThan(0);
+    expect(item?.level).toBe('warning');
+    // 放宽的是「单向」：hits=0 / 恒真 / 互相蕴含仍然是错误。
+    expect(result.violations).toEqual([]);
+    expect(result.warnings.join('\n')).toContain('casino-pair');
   });
 
   it('同一个 group 内的蕴含是**允许**的（阶梯规则），不算违规', () => {

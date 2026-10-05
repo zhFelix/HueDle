@@ -11,7 +11,7 @@
  */
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ADD_BADGE_OUT_DIR, ensureOutDirs, type FailureAttribution, type PipelineState } from './state';
+import { ADD_BADGE_OUT_DIR, ensureOutDirs, type FailureAttribution, type PipelineState, type StatusWarning } from './state';
 
 export interface BatchSpecMeta {
   id: string;
@@ -29,6 +29,10 @@ export interface BatchRecord {
   failureClass?: string;
   conclusion?: string;
   failureAttribution?: FailureAttribution;
+  /** 单向蕴含警告（待确认批次展开时显示；由子进程回填）。 */
+  warnings?: StatusWarning[];
+  /** 本批 spec 的内容哈希（「继续」确认绑定用）。 */
+  specHash?: string;
 }
 
 export function batchesFile(adminRoot: string): string {

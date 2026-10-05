@@ -27,9 +27,11 @@ import { SpecError, parseBadgeSpec, type BadgeSpec } from '../addbadge/spec';
 import { makeRunId, submitBadgeJob, type SubmitResult } from '../addbadge/submit';
 import {
   addDraft,
+  continuePendingBatch,
   draftFieldsFromForm,
   removeDraft,
   runStagedBatch,
+  type ContinueStagedOptions,
   type DraftFields,
   type RunStagedOptions,
   type StagedDraft,
@@ -105,6 +107,11 @@ export interface UiBadgeOptions {
    * 测试可注入以断言 HTTP 层只负责转发。
    */
   runStaged?: (options: RunStagedOptions) => SubmitResult;
+  /**
+   * 「继续」待确认批次：默认 {@link continuePendingBatch}（读回作业文件 + 带上确认哈希，
+   * **新起一次运行**）。测试可注入以断言 HTTP 层只负责转发。
+   */
+  continuePending?: (options: ContinueStagedOptions) => SubmitResult;
   /** 树形列表模型；默认 {@link buildBatchTree}。 */
   readTree?: (adminRoot: string) => TreeBatch[];
   /**
@@ -419,6 +426,55 @@ async function handleBadgeRun(
   redirect(res, `/badge?submitted=${encodeURIComponent(result.runId)}`);
 }
 
+/** `POST /badge/continue`：把停在【待确认】的批次带上确认哈希**重新提交**。 */
+async function handleBadgeContinue(
+  badge: UiBadgeOptions,
+  token: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const fields = await readAuthorizedForm(token, req, res);
+  if (!fields) return;
+  const cont = badge.continuePending ?? continuePendingBatch;
+  const providedHash = fields.get('specHash');
+  let result: SubmitResult;
+  try {
+    result = cont({
+      adminRoot: badge.adminRoot,
+      root: badge.root,
+      ...(providedHash ? { acceptedSpecHash: providedHash } : {}),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    redirect(res, `/badge?error=${encodeURIComponent(`继续失败：${message}`)}`);
+    return;
+  }
+  if (!result.ok) {
+    redirect(res, `/badge?error=${encodeURIComponent(result.reason)}`);
+    return;
+  }
+  redirect(res, `/badge?continued=${encodeURIComponent(result.runId)}`);
+}
+
+/**
+ * `POST /badge/modify`：**什么都不发生**。
+ *
+ * 「修改」是「不接受这些警告，回去编辑」的出口：它不跑管道、不抢锁、不写任何文件、
+ * 不产生快照，只是把用户送回表单页（表单本来就在同一个页面上）。
+ * 刻意保留成一条显式路由（而不是 a 标签），这样「零副作用」是可断言的。
+ */
+async function handleBadgeModify(
+  badge: UiBadgeOptions,
+  token: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const fields = await readAuthorizedForm(token, req, res);
+  if (!fields) return;
+  void badge;
+  redirect(res, '/badge?modified=1');
+}
+
 /** 303：POST 之后回到表单页（PRG，避免刷新重复提交）。 */
 function redirect(res: ServerResponse, location: string): void {
   res.writeHead(303, {
@@ -460,6 +516,14 @@ async function handleRequest(
         await handleBadgeRun(options.badge, token, req, res);
         return;
       }
+      if (url.pathname === '/badge/continue') {
+        await handleBadgeContinue(options.badge, token, req, res);
+        return;
+      }
+      if (url.pathname === '/badge/modify') {
+        await handleBadgeModify(options.badge, token, req, res);
+        return;
+      }
     }
     send(
       res,
@@ -490,15 +554,21 @@ async function handleRequest(
     const submitted = url.searchParams.get('submitted');
     const saved = url.searchParams.get('saved');
     const deleted = url.searchParams.get('deleted');
+    const continued = url.searchParams.get('continued');
+    const modified = url.searchParams.get('modified');
     const message = error
       ? `提交被拒绝：${error}`
       : submitted
         ? `已提交：${submitted}。管道在子进程里跑。`
-        : saved
-          ? `已保存到暂存区：${saved}（未跑任何东西）。`
-          : deleted
-            ? '已从暂存区删除。'
-            : undefined;
+        : continued
+          ? `已继续：${continued}（带上了上次的内容哈希，接着往下跑）。`
+          : saved
+            ? `已保存到暂存区：${saved}（未跑任何东西）。`
+            : deleted
+              ? '已从暂存区删除。'
+              : modified
+                ? '已返回编辑状态：未做任何改动（仓库零改动、无快照）。'
+                : undefined;
     send(
       res,
       200,

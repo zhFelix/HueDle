@@ -104,6 +104,15 @@ function printStatus(deps: CommandDeps): number {
     if (status.hitsBySpec) {
       for (const item of status.hitsBySpec) out(deps, `  ${item.id}: ${item.hits}`);
     }
+    if (status.warnings && status.warnings.length > 0) {
+      out(
+        deps,
+        `单向蕴含   : ${status.warnings.length} 条⚠（警告，不是错误；${status.state === 'awaiting_confirmation' ? '等待确认' : '已接受'}）`,
+      );
+      if (status.state === 'awaiting_confirmation') {
+        for (const warning of status.warnings) out(deps, `  - ${warning.message}`);
+      }
+    }
     if (status.failureClass) out(deps, `失败分类   : ${status.failureClass}`);
     if (status.snapshotPath) out(deps, `快照       : ${status.snapshotPath}`);
     out(deps, `日志       : ${status.logPath}`);

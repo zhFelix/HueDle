@@ -15,10 +15,17 @@
  */
 import { readBatches } from './history';
 import { readStaging } from './staging';
-import { readStatus, type FailureAttribution, type PipelineState } from './state';
+import { readStatus, type FailureAttribution, type PipelineState, type StatusWarning } from './state';
 
-/** 批次左图标的状态（四态，与任务的映射表一一对应）。 */
-export type BatchIconState = 'pending' | 'running' | 'succeeded' | 'failed';
+/**
+ * 批次左图标的状态（五态）：
+ *   - `pending`   待运行（空圈）
+ *   - `running`   正在运行（转圈）
+ *   - `succeeded` 成功（绿底白勾）
+ *   - `awaiting`  **待确认**：只有单向蕴含警告，**没有失败**（琥珀 ⚠）
+ *   - `failed`    失败（红底白叉）
+ */
+export type BatchIconState = 'pending' | 'running' | 'succeeded' | 'awaiting' | 'failed';
 
 export interface TreeItem {
   id: string;
@@ -43,16 +50,22 @@ export interface TreeBatch {
   seconds?: number;
   /** 批次失败原因（批次左边红叉的 hover）。 */
   reason?: string;
+  /** 待确认批次：单向蕴含警告清单（展开后逐条显示）。 */
+  warnings?: StatusWarning[];
+  /** 待确认批次：spec 内容哈希（「继续」会带回它）。 */
+  specHash?: string;
   items: TreeItem[];
   /** 是否是「当前正在攒的这一批」。 */
   pending: boolean;
 }
 
-/** pipeline 状态 → 图标四态。 */
+/** pipeline 状态 → 图标五态。 */
 export function stateFromRaw(raw: PipelineState | undefined): BatchIconState {
   if (raw === undefined) return 'pending';
   if (raw === 'running') return 'running';
-  return raw === 'succeeded' ? 'succeeded' : 'failed';
+  if (raw === 'succeeded') return 'succeeded';
+  if (raw === 'awaiting_confirmation') return 'awaiting';
+  return 'failed';
 }
 
 /** 两个 ISO 时间之间的整秒数（任一缺失/非法返回 undefined）。 */
@@ -116,6 +129,8 @@ export function buildBatchTree(adminRoot: string, now: Date = new Date()): TreeB
     const startedAt = fresh?.startedAt ?? record.startedAt;
     const finishedAt = fresh?.finishedAt ?? record.finishedAt;
     const attribution = fresh?.failureAttribution ?? record.failureAttribution;
+    const warnings = fresh?.warnings ?? record.warnings;
+    const specHash = fresh?.specHash ?? record.specHash;
     const reason = fresh
       ? statusReason(fresh.conclusion, fresh.failureClass)
       : statusReason(record.conclusion, record.failureClass);
@@ -132,6 +147,11 @@ export function buildBatchTree(adminRoot: string, now: Date = new Date()): TreeB
           ? secondsBetween(startedAt, nowIso)
           : secondsBetween(startedAt, finishedAt),
       ...(state === 'failed' ? { reason } : {}),
+      ...(state === 'awaiting' && warnings && warnings.length > 0
+        ? { reason: `有 ${warnings.length} 条单向蕴含警告，等待确认（这不是失败）` }
+        : {}),
+      ...(warnings && warnings.length > 0 ? { warnings } : {}),
+      ...(specHash ? { specHash } : {}),
       items: record.specs.map(spec => {
         const failure = itemFailure(attribution, spec.id);
         return {

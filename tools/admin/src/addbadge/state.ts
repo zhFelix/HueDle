@@ -43,6 +43,14 @@ export type PipelineState =
   | 'rolled_back'
   | 'needs_manual'
   | 'rollback_failed'
+  /**
+   * **待确认**：干跑没有任何硬错误，但有若干**单向蕴含警告**。
+   * 阶段 1 跑完就**正常退出**（子进程绝不挂着等输入），工作区零改动；
+   * 「继续」是**新起一次运行**，带 `acceptedSpecHash`。
+   *
+   * 它**不是失败**——UI 的图标必须与「失败」区分开。
+   */
+  | 'awaiting_confirmation'
   | 'refused';
 
 export interface StatusSpec {
@@ -50,6 +58,23 @@ export interface StatusSpec {
   name: string;
   family: string;
   group: string | null;
+}
+
+/**
+ * 一条**单向蕴含警告**（不组织写入，只需人确认一次）。
+ *
+ * 「待确认」页面靠它渲染警告清单（对方 id / 方向 / 共命中数 / Jaccard）。
+ */
+export interface StatusWarning {
+  /** 与哪条徽章蕴含：既有徽章的 id，或同批另一条新徽章的 id。 */
+  otherId: string;
+  /** `existing` = 与既有徽章；`new` = 与新提交的同批徽章。 */
+  scope: 'existing' | 'new';
+  direction: string;
+  cohits: number;
+  jaccard: number;
+  /** 面向人的完整文案（明确写着「警告，不是错误」）。 */
+  message: string;
 }
 
 /**
@@ -102,6 +127,12 @@ export interface PipelineStatus {
   hits?: number;
   /** 批量模式：每条新徽章的干跑 hits。 */
   hitsBySpec?: Array<{ id: string; hits: number }>;
+  /** 单向蕴含警告清单（只有警告时为「待确认」，UI 展开显示）。 */
+  warnings?: StatusWarning[];
+  /** 本批 spec 集合的**内容哈希**——「继续」时带回来，绑定确认与内容。 */
+  specHash?: string;
+  /** 本次运行被接受的确认哈希（与 `specHash` 相等才会跳过待确认）。 */
+  acceptedSpecHash?: string;
   snapshotPath?: string;
   logPath: string;
   evidence: string[];

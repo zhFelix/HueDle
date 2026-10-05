@@ -34,6 +34,8 @@ export interface ChildJobFile {
   specs?: unknown[];
   logPath: string;
   startedAt?: string;
+  /** 「继续」带回来的、已接受的 spec 内容哈希（见 pipeline.ts 的两阶段确认）。 */
+  acceptedSpecHash?: string;
 }
 
 export function runChild(jobPath: string, adminRoot: string, root: string): number {
@@ -130,8 +132,24 @@ export function runChild(jobPath: string, adminRoot: string, root: string): numb
       },
     };
     const outcome = isBatch
-      ? runBatchPipeline({ runId: job.runId, specs, logPath: job.logPath }, deps)
-      : runPipeline({ runId: job.runId, spec: specs[0]!, logPath: job.logPath }, deps);
+      ? runBatchPipeline(
+          {
+            runId: job.runId,
+            specs,
+            logPath: job.logPath,
+            ...(job.acceptedSpecHash !== undefined ? { acceptedSpecHash: job.acceptedSpecHash } : {}),
+          },
+          deps,
+        )
+      : runPipeline(
+          {
+            runId: job.runId,
+            spec: specs[0]!,
+            logPath: job.logPath,
+            ...(job.acceptedSpecHash !== undefined ? { acceptedSpecHash: job.acceptedSpecHash } : {}),
+          },
+          deps,
+        );
     // 回填批次历史（只有 UI 的统一跑写过记录；CLI 提交时这里是 no-op）。
     // 树形列表靠它显示历史批次的最终状态与「哪一条失败」。
     recordBatchOutcome(adminRoot, job.runId, {
@@ -140,6 +158,8 @@ export function runChild(jobPath: string, adminRoot: string, root: string): numb
       ...(outcome.failureClass ? { failureClass: outcome.failureClass } : {}),
       conclusion: outcome.conclusion,
       ...(outcome.failureAttribution ? { failureAttribution: outcome.failureAttribution } : {}),
+      ...(outcome.warnings ? { warnings: outcome.warnings } : {}),
+      ...(outcome.specHash ? { specHash: outcome.specHash } : {}),
     });
     console.log(`[addbadge] 结束：exitCode=${outcome.exitCode} state=${outcome.state}`);
     console.log(`[addbadge] ${outcome.conclusion}`);

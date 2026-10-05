@@ -8,11 +8,12 @@
 import { escapeHtml } from '../render/html';
 import type { TreeBatch, TreeItem } from '../addbadge/tree';
 
-/** 四态 → CSS 类名（测试与页面共用同一份字面量）。 */
+/** 五态 → CSS 类名（测试与页面共用同一份字面量）。 */
 export const BATCH_STATE_CLASS: Readonly<Record<TreeBatch['state'], string>> = {
   pending: 'batch-pending',
   running: 'batch-running',
   succeeded: 'batch-succeeded',
+  awaiting: 'batch-awaiting',
   failed: 'batch-failed',
 };
 
@@ -20,6 +21,8 @@ const GLYPH: Readonly<Record<TreeBatch['state'], string>> = {
   pending: '○',
   running: '◌',
   succeeded: '✓',
+  // 「待确认」**不是失败**：琥珀感叹号，与红叉明确区分。
+  awaiting: '!',
   failed: '✗',
 };
 
@@ -35,6 +38,7 @@ function secondsText(seconds: number | undefined): string {
  *   - 待运行：`待运行`
  *   - 正在运行：`正在运行 · 已跑 N 秒`
  *   - 成功：`运行成功 · 用时 N 秒`
+ *   - **待确认**：`有 N 条单向蕴含警告，等待确认（这不是失败）`
  *   - 失败：`运行失败 · 用时 N 秒 · 原因`
  */
 export function renderBatchIcon(batch: TreeBatch): string {
@@ -43,7 +47,10 @@ export function renderBatchIcon(batch: TreeBatch): string {
   if (batch.state === 'pending') title = '待运行';
   else if (batch.state === 'running') title = `正在运行 · 已跑 ${secondsText(batch.seconds)}`;
   else if (batch.state === 'succeeded') title = `运行成功 · 用时 ${secondsText(batch.seconds)}`;
-  else title = `运行失败 · 用时 ${secondsText(batch.seconds)} · ${batch.reason ?? '原因见结论'}`;
+  else if (batch.state === 'awaiting') {
+    const count = batch.warnings?.length ?? 0;
+    title = `有 ${count} 条单向蕴含警告，等待确认（这不是失败，工作区零改动）`;
+  } else title = `运行失败 · 用时 ${secondsText(batch.seconds)} · ${batch.reason ?? '原因见结论'}`;
 
   const dataAttrs =
     batch.state === 'running' && batch.key !== 'pending'
@@ -81,6 +88,49 @@ function renderItems(batch: TreeBatch, token?: string): string {
 }
 
 /**
+ * 「待确认」批次的展开内容：警告清单 + 两个按钮。
+ *
+ * 警告文案**必须写清这不是错误**（否则用户会以为失败了）；按钮是「继续」与「修改」，
+ * 都走与其它写端点完全相同的令牌检查。
+ */
+function renderAwaiting(batch: TreeBatch, token?: string): string {
+  const warnings = batch.warnings ?? [];
+  const list = warnings.length > 0
+    ? `<ul class="batch-warnings">\n${warnings
+        .map(
+          item =>
+            `<li class="batch-warning"><span class="warning-label">警告，不是错误</span>`
+            + `<span class="warning-other">对端 ${escapeHtml(item.otherId)}</span>`
+            + `<span class="warning-meta">${escapeHtml(item.direction)} · 共命中 ${item.cohits} · Jaccard ${item.jaccard.toFixed(4)}</span>`
+            + `<span class="warning-text">${escapeHtml(item.message)}</span></li>`,
+        )
+        .join('\n')}\n</ul>`
+    : '<p class="meta">（没有可显示的警告明细）</p>';
+  const hashInput = batch.specHash
+    ? `<input type="hidden" name="specHash" value="${escapeHtml(batch.specHash)}">`
+    : '';
+  return `<div class="batch-awaiting">
+<p class="batch-awaiting-note"><strong>待确认</strong>：干跑没有任何硬错误，只有 ${warnings.length} 条<b>单向蕴含警告</b>。
+单向蕴含是徽章系统的固有性质（越稀有的徽章必然被更宽的徽章包含），<strong>它不阻止写入，也不是失败</strong>；
+工作区仍然零改动。点「继续」才写盘，「修改」则什么都不发生。</p>
+${list}
+<div class="batch-actions">
+<form method="post" action="/badge/continue">
+<input type="hidden" name="token" value="${escapeHtml(token ?? '')}">
+<input type="hidden" name="runId" value="${escapeHtml(batch.key)}">
+${hashInput}
+<button type="submit" class="btn-continue">继续（接受这些警告，继续跑）</button>
+</form>
+<form method="post" action="/badge/modify">
+<input type="hidden" name="token" value="${escapeHtml(token ?? '')}">
+<input type="hidden" name="runId" value="${escapeHtml(batch.key)}">
+<button type="submit" class="btn-modify">修改（什么都不发生）</button>
+</form>
+</div>
+</div>`;
+}
+
+/**
  * 整棵树。
  *
  * 形态：成功的批次收成一行（`<details>` 折叠），失败的批次默认展开（`open`），
@@ -94,9 +144,13 @@ export function renderBatchTree(batches: readonly TreeBatch[], options: { token?
     .map(batch => {
       const header = `<summary>${renderBatchIcon(batch)}<span class="batch-title">${escapeHtml(batch.title)}</span>`
         + `<span class="batch-count">${batch.items.length} 条</span></summary>`;
-      const open = batch.pending || batch.state === 'failed' ? ' open' : '';
+      const open = batch.pending || batch.state === 'failed' || batch.state === 'awaiting' ? ' open' : '';
+      const body =
+        batch.state === 'awaiting'
+          ? `${renderItems(batch, options.token)}\n${renderAwaiting(batch, options.token)}`
+          : renderItems(batch, options.token);
       return `<details class="batch batch-${batch.pending ? 'pending' : batch.state}" id="batch-${escapeHtml(batch.key)}"${open}>\n`
-        + `${header}\n${renderItems(batch, options.token)}\n</details>`;
+        + `${header}\n${body}\n</details>`;
     })
     .join('\n');
 }

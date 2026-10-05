@@ -45,6 +45,9 @@ function statusText(view: StatusView): string {
     `最近更新   : ${status.updatedAt}`,
   ];
   if (status.hits !== undefined) lines.push(`干跑 hits  : ${status.hits}`);
+  if (status.warnings && status.warnings.length > 0) {
+    lines.push(`单向蕴含   : ${status.warnings.length} 条⚠（警告，不是错误；${status.state === 'awaiting_confirmation' ? '等待确认' : '已接受'}）`);
+  }
   if (status.failureClass) lines.push(`失败分类   : ${status.failureClass}`);
   if (status.snapshotPath) lines.push(`快照       : ${status.snapshotPath}`);
   lines.push(`日志       : ${status.logPath}`);
@@ -84,6 +87,7 @@ const BADGE_PAGE_JS = `(function () {
       '最近更新   : ' + s.updatedAt
     ];
     if (typeof s.hits === 'number') lines.push('干跑 hits  : ' + s.hits);
+    if (s.warnings && s.warnings.length > 0) lines.push('单向蕴含   : ' + s.warnings.length + ' 条⚠（警告，不是错误；' + (s.state === 'awaiting_confirmation' ? '等待确认' : '已接受') + '）');
     if (s.failureClass) lines.push('失败分类   : ' + s.failureClass);
     if (s.snapshotPath) lines.push('快照       : ' + s.snapshotPath);
     lines.push('日志       : ' + s.logPath);
@@ -94,6 +98,8 @@ const BADGE_PAGE_JS = `(function () {
       bar.textContent = '⚠ ' + (d.interruption || '检出未跑完的管道');
     } else if (s.state === 'running') {
       bar.textContent = '运行中…（本页只读状态文件，关掉浏览器不影响管道）';
+    } else if (s.state === 'awaiting_confirmation') {
+      bar.textContent = '等待确认：有单向蕴含警告（这不是失败，工作区零改动）——点批次里的「继续」或「修改」';
     } else {
       bar.textContent = '已结束：' + s.state;
     }
@@ -156,6 +162,8 @@ export function renderBadgePage(options: BadgePageOptions): string {
   .batch-status.batch-running { border: 2px solid var(--amber-400); color: var(--amber-300); }
   .batch-status.batch-succeeded { background: var(--emerald-400); color: #fff; }
   .batch-status.batch-failed { background: var(--red-300); color: #fff; }
+  /* 「待确认」不是失败：琥珀实心 + 感叹号，与红叉/绿勾都不同 */
+  .batch-status.batch-awaiting { background: var(--amber-400); color: var(--ink-950); }
   .batch-spinner { display: inline-block; animation: batch-spin 1.1s linear infinite; }
   @keyframes batch-spin { to { transform: rotate(360deg); } }
   .batch-title { font-family: var(--font-mono); font-size: .85rem; color: var(--neutral-100); }
@@ -173,6 +181,22 @@ export function renderBadgePage(options: BadgePageOptions): string {
   .run-bar button { background: var(--amber-400); color: var(--ink-950); border: 0; border-radius: 9999px; padding: .4rem 1.2rem; font-weight: 700; cursor: pointer; }
   .run-bar button:disabled { background: var(--ink-800); color: var(--neutral-500); cursor: not-allowed; }
   .run-bar .mode-note { margin: .4rem 0 0; }
+  /* ── 待确认：警告清单 + 继续/修改 ── */
+  .batch-awaiting { margin: 0 .75rem .7rem 2.4rem; border-left: 3px solid var(--amber-400); padding: .5rem .7rem; background: var(--ink-950); border-radius: .4rem; }
+  .batch-awaiting-note { color: var(--neutral-300); font-size: .78rem; margin: 0 0 .5rem; line-height: 1.5; }
+  .batch-awaiting-note strong { color: var(--amber-300); }
+  .batch-warnings { list-style: none; margin: 0 0 .6rem; padding: 0; }
+  .batch-warning { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: baseline; padding: .3rem 0; border-top: 1px solid var(--ink-800); font-size: .76rem; }
+  .warning-label { background: var(--amber-400); color: var(--ink-950); border-radius: 9999px; padding: 0 .5rem; font-weight: 700; font-size: .68rem; }
+  .warning-other { font-family: var(--font-mono); color: var(--neutral-100); }
+  .warning-meta { color: var(--neutral-500); font-family: var(--font-mono); font-size: .7rem; }
+  .warning-text { flex: 1 1 100%; color: var(--neutral-400); }
+  .batch-actions { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+  .batch-actions button { border: 0; border-radius: 9999px; padding: .35rem 1.05rem; font-weight: 700; cursor: pointer; }
+  .batch-actions .btn-continue { background: var(--amber-400); color: var(--ink-950); }
+  .batch-actions .btn-continue:hover { background: var(--amber-200); }
+  .batch-actions .btn-modify { background: var(--ink-800); color: var(--neutral-200); border: 1px solid var(--ink-700); }
+  .batch-actions .btn-modify:hover { color: var(--neutral-100); }
 </style>
 </head>
 <body>
@@ -228,8 +252,10 @@ ${lockNote}
 
 <section class="card" id="batches">
 <h2>批次 / 暂存区</h2>
-<p class="question">批次 = 一次「统一跑」的单位。左边是状态：空圈=待运行、转圈=正在运行、绿底白勾=成功、红底白叉=失败；
-失败能归因到某一条时，只在那一条上加 ✕（hover 显示它自己的原因）。</p>
+<p class="question">批次 = 一次「统一跑」的单位。左边是状态：空圈=待运行、转圈=正在运行、绿底白勾=成功、
+<b>琥珀 ! = 有单向蕴含警告待确认（这不是失败）</b>、红底白叉=失败；
+失败能归因到某一条时，只在那一条上加 ✕（hover 显示它自己的原因）。
+「待确认」的批次展开后可以看到警告清单，并选择「继续」或「修改」。</p>
 <div id="batch-tree">
 ${renderBatchTree(tree, { token: options.token })}
 </div>

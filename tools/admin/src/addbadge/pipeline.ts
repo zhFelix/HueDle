@@ -30,11 +30,14 @@ import {
   loadExistingChecks,
   runBatchDryRun,
   runDryRun,
+  subsetWarningMessage,
   type BatchDryRunOptions,
   type BatchDryRunResult,
   type DryRunOptions,
   type DryRunResult,
   type ExistingCheck,
+  type Implication,
+  type PairwiseImplication,
 } from './dryrun';
 import {
   affectedPathsFor,
@@ -56,6 +59,7 @@ import {
   type PipelineState,
   type PipelineStatus,
   type StatusSpec,
+  type StatusWarning,
 } from './state';
 
 // ───────────────────────────── 退出码 ─────────────────────────────
@@ -73,6 +77,13 @@ export const EXIT_LOCKED = 6;
 export const EXIT_DIRTY_WORKTREE = 7;
 /** 检出「有一个没跑完的管道」：先人工处理，再开跑。 */
 export const EXIT_INTERRUPTED = 8;
+/**
+ * **待确认**：干跑只有单向蕴含警告、没有硬错误。
+ *
+ * 阶段 1 跑完就正常退出（子进程绝不挂着等输入），工作区零改动；「继续」是新起一次运行。
+ * 与 `EXIT_ROLLED_BACK` 的区别：这不是失败，什么都没被拒绝，只是在等人点一下。
+ */
+export const EXIT_AWAITING_CONFIRMATION = 9;
 
 // ───────────────────────────── 依赖注入 ─────────────────────────────
 
@@ -127,6 +138,11 @@ export interface PipelineJob {
   /** 已解析的 spec（结构化或手写）。 */
   spec: BadgeSpec;
   logPath: string;
+  /**
+   * 「继续」带回来的、**已接受**的单向蕴含警告对应的 spec 内容哈希。
+   * 与本次重算的 {@link specContentHash} 相等才跳过「待确认」。
+   */
+  acceptedSpecHash?: string;
 }
 
 /** 批量作业：一次提交 N 条 spec，整批是一个事务。 */
@@ -135,6 +151,8 @@ export interface BatchPipelineJob {
   /** ≥1 条；长度 1 时行为与 {@link PipelineJob} 完全一致。 */
   specs: BadgeSpec[];
   logPath: string;
+  /** 见 {@link PipelineJob.acceptedSpecHash}。 */
+  acceptedSpecHash?: string;
 }
 
 export interface PipelineOutcome {
@@ -147,6 +165,10 @@ export interface PipelineOutcome {
   hits?: number;
   /** 批量模式：每条新徽章的干跑 hits。 */
   hitsBySpec?: Array<{ id: string; hits: number }>;
+  /** 单向蕴含警告清单（待确认 / 已接受的证据）。 */
+  warnings?: StatusWarning[];
+  /** 本批 spec 集合的内容哈希（「继续」要用它绑定确认）。 */
+  specHash?: string;
   /** 失败归因（树形列表靠它决定「条目上要不要加 ✕」）。 */
   failureAttribution?: FailureAttribution;
 }
@@ -284,6 +306,80 @@ export function md5OfFile(path: string): string {
   return createHash('md5').update(readFileSync(path)).digest('hex');
 }
 
+// ─────────────────── 确认与 spec 内容的绑定（两阶段确认流程） ───────────────────
+
+/** 递归按键排序的规范 JSON：对象键顺序不同不影响哈希。 */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`);
+    return `{${entries.join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+/**
+ * 整批 spec 的**内容哈希**。
+ *
+ * 为什么必须有它：「继续」是新起一次运行；如果只带一个布尔「已接受」标志，
+ * 用户确认警告 → 回去改 spec → 再点继续，**那个确认会错误地适用于改后的内容**。
+ * 所以确认绑定到内容哈希：哈希不匹配就作废、重新给警告。
+ *
+ * 哈希覆盖判定条件本身（结构化 `when` / 手写 `check` + `evalHelpers`）与身份字段
+ * （id/name/description/family/group），与 `pipeline.ts` 里实际写盘的东西一一对应。
+ */
+export function specContentHash(specs: readonly BadgeSpec[]): string {
+  const content = specs.map(spec => {
+    const identity = {
+      id: spec.id,
+      name: spec.name,
+      description: spec.description,
+      family: spec.family,
+      group: spec.group ?? null,
+    };
+    const condition = isHandwritten(spec)
+      ? { handwritten: { check: spec.handwritten.check, evalHelpers: spec.handwritten.evalHelpers ?? null } }
+      : { when: spec.when };
+    return canonicalJson({ ...identity, ...condition });
+  });
+  return createHash('sha256').update(canonicalJson(content)).digest('hex');
+}
+
+/** 把「候选 vs 既有」的 warning 级蕴含翻成结构化警告（文案与干跑完全同源）。 */
+function warningsFromImplications(subject: string, items: readonly Implication[]): StatusWarning[] {
+  return items
+    .filter(item => item.level === 'warning')
+    .map(item => ({
+      otherId: item.id,
+      scope: 'existing' as const,
+      direction: item.direction,
+      cohits: item.cohits,
+      jaccard: item.jaccard,
+      message: `${subject}${subsetWarningMessage('', item.id, item)}`,
+    }));
+}
+
+/** 把「新 vs 新」的 warning 级蕴含翻成结构化警告。 */
+function warningsFromPairwise(items: readonly PairwiseImplication[]): StatusWarning[] {
+  return items
+    .filter(item => item.level === 'warning')
+    .map(item => {
+      const narrow = item.direction === 'a-subset-of-b' ? item.a : item.b;
+      const otherId = narrow === item.a ? item.b : item.a;
+      return {
+        otherId,
+        scope: 'new' as const,
+        direction: item.direction,
+        cohits: item.cohits,
+        jaccard: item.jaccard,
+        message: subsetWarningMessage(`新徽章 "${item.a}" 与 "${item.b}"：`, otherId, item),
+      };
+    });
+}
+
 // ───────────────────────────── 批量辅助 ─────────────────────────────
 
 /** 一个 spec → 状态文件里的元数据。 */
@@ -317,7 +413,7 @@ export function assertBatchInternalUnique(specs: readonly BadgeSpec[]): void {
 
 /** 单条路径（既有行为，调用方与测试都只用它）。 */
 export function runPipeline(job: PipelineJob, deps: PipelineDeps): PipelineOutcome {
-  return runPipelineCore(job.runId, [job.spec], job.logPath, deps);
+  return runPipelineCore(job.runId, [job.spec], job.logPath, deps, job.acceptedSpecHash);
 }
 
 /**
@@ -331,7 +427,7 @@ export function runBatchPipeline(job: BatchPipelineJob, deps: PipelineDeps): Pip
   if (job.specs.length === 0) {
     throw new SpecError('批量加徽章至少要有一条 spec', 'specs');
   }
-  return runPipelineCore(job.runId, job.specs, job.logPath, deps);
+  return runPipelineCore(job.runId, job.specs, job.logPath, deps, job.acceptedSpecHash);
 }
 
 function runPipelineCore(
@@ -339,6 +435,7 @@ function runPipelineCore(
   specs: BadgeSpec[],
   logPath: string,
   deps: PipelineDeps,
+  acceptedSpecHash?: string,
 ): PipelineOutcome {
   const commands = deps.commands ?? DEFAULT_COMMANDS;
   const isBatch = specs.length > 1;
@@ -346,6 +443,10 @@ function runPipelineCore(
   const families = [...new Set(specs.map(item => item.family))];
   const specMetas = specs.map(specMeta);
   const status = makeStatus({ runId, spec: summarizeSpecs(specs), logPath, pid: process.pid });
+  // 「继续」的确认绑定在 spec 内容哈希上：本次重算，只有与 acceptedSpecHash 相等才跳过待确认。
+  const specHash = specContentHash(specs);
+  status.specHash = specHash;
+  if (acceptedSpecHash !== undefined) status.acceptedSpecHash = acceptedSpecHash;
   if (isBatch) {
     status.specCount = specs.length;
     status.specs = specMetas;
@@ -395,7 +496,40 @@ function runPipelineCore(
       ...(status.failureAttribution ? { failureAttribution: status.failureAttribution } : {}),
       ...(status.hits !== undefined ? { hits: status.hits } : {}),
       ...(status.hitsBySpec ? { hitsBySpec: status.hitsBySpec } : {}),
+      ...(status.warnings ? { warnings: status.warnings } : {}),
+      ...(status.specHash ? { specHash: status.specHash } : {}),
     };
+  };
+
+  /**
+   * 只有**单向蕴含警告**时的两阶段确认出入口。
+   *
+   *   - 没有警告 → 返回 `null`，照常往下跑；
+   *   - 有警告且 `acceptedSpecHash === specHash` → 记证据、返回 `null`（继续写盘）；
+   *   - 有警告且哈希不匹配（含首次运行、改过 spec）→ **写状态并正常退出**，
+   *     状态停在 `awaiting_confirmation`，工作区零改动。
+   *
+   * 子进程绝不在这里等输入：等待发生在人的那一次点击上，「继续」是新起一次运行。
+   */
+  const handleWarnings = (warnings: StatusWarning[]): PipelineOutcome | null => {
+    if (warnings.length === 0) return null;
+    status.warnings = warnings;
+    if (acceptedSpecHash !== undefined && acceptedSpecHash === specHash) {
+      evidence.push(
+        `已接受 ${warnings.length} 条单向蕴含警告（spec 内容哈希 ${specHash} 与确认一致），继续写盘。`,
+      );
+      return null;
+    }
+    const accepted = acceptedSpecHash === undefined ? '（本次未带确认）' : `（带的确认哈希 ${acceptedSpecHash} 与本次内容 ${specHash} 不匹配，已作废）`;
+    return finish(
+      'awaiting_confirmation',
+      EXIT_AWAITING_CONFIRMATION,
+      `干跑通过：没有任何硬错误；但有 ${warnings.length} 条单向蕴含警告，停在【待确认】${accepted}。`
+      + '**这不是失败**——部分包含是徽章系统的固有性质，工作区仍然零改动。\n'
+      + warnings.map(item => `  - ${item.message}`).join('\n')
+      + `\n「继续」会带上本批 spec 的内容哈希（${specHash}）重新提交；改了 spec 哈希就会变，确认随之作废。`,
+      'dryrun-warnings',
+    );
   };
 
   /** 共用回滚：还原 → 证明还原 → 证明回到绿（§3.5）。 */
@@ -532,6 +666,13 @@ function runPipelineCore(
           attributeBatchDryRun(specs, result),
         );
       }
+      // 硬错误之外只剩单向蕴含警告 → 两级确认流程（见 handleWarnings）。
+      const warnings = [
+        ...result.candidates.flatMap(item => warningsFromImplications(`徽章 "${item.id}"：`, item.implications)),
+        ...warningsFromPairwise(result.pairwise),
+      ];
+      const awaiting = handleWarnings(warnings);
+      if (awaiting) return awaiting;
     } else {
       const dryRun = deps.dryRun ?? runDryRun;
       const result = dryRun({
@@ -561,6 +702,8 @@ function runPipelineCore(
           attributeSingleDryRun(spec, result.violations),
         );
       }
+      const awaiting = handleWarnings(warningsFromImplications('', result.implications));
+      if (awaiting) return awaiting;
     }
 
     // ── 阶段 1：快照 + 写入 ────────────────────────────────────────

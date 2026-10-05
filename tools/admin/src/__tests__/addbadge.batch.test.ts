@@ -20,7 +20,7 @@ import { addBadgePaths } from '../addbadge/state';
 import { parseAdminArgs } from '../argv';
 import { buildSpecFromArgs } from '../addbadge/commands';
 import { makeBatchRunId, submitBadgeBatchJob, type SpawnedChild } from '../addbadge/submit';
-import { EXIT_LOCKED, EXIT_ROLLED_BACK, runBatchPipeline, runPipeline, type BatchPipelineJob } from '../addbadge/pipeline';
+import { EXIT_AWAITING_CONFIRMATION, EXIT_LOCKED, EXIT_ROLLED_BACK, runBatchPipeline, runPipeline, type BatchPipelineJob } from '../addbadge/pipeline';
 import { parseBadgeSpec, type BadgeSpec } from '../addbadge/spec';
 import { createFakeExec, createFakeRepo, pipelineDeps, silenceLogs, type FakeRepo } from './addbadge.fixtures';
 
@@ -100,15 +100,21 @@ describe('批量测试 1：新 vs 新的必然蕴含被拦（核心新逻辑）'
     expect(snapshotCount()).toBe(0);
   });
 
-  it('A ⊂ B（一条是另一条的子集）也被拦下', () => {
+  it('A ⊂ B（一条是另一条的子集）→ 只算警告：停在【待确认】，不是失败', () => {
     // `b === 7` 命中集合 ⊂ `b < 128` 命中集合，且 group 不同。
     const narrow = makeSpec({ id: 'gray-batch-narrow', name: '窄规则', description: 'B = 7' });
     const wide = makeSpec({ id: 'gray-batch-wide', name: '宽规则', description: 'B < 128', when: { lt: [{ field: 'b' }, 128] } });
     const outcome = runBatchPipeline(batchJob([narrow, wide]), pipelineDeps(repo));
-    expect(outcome.exitCode).toBe(EXIT_ROLLED_BACK);
-    expect(outcome.failureClass).toBe('dryrun');
+    // 单向蕴含不再拒绝：状态是待确认（不是 refused），退出码是专用码 9。
+    expect(outcome.exitCode).toBe(EXIT_AWAITING_CONFIRMATION);
+    expect(outcome.state).toBe('awaiting_confirmation');
+    expect(outcome.failureClass).toBe('dryrun-warnings');
     expect(outcome.conclusion).toContain('gray-batch-narrow');
     expect(outcome.conclusion).toContain('gray-batch-wide');
+    expect(outcome.conclusion).toContain('这不是失败');
+    expect(outcome.warnings?.some(item => item.scope === 'new')).toBe(true);
+    expect(outcome.warnings?.length).toBeGreaterThanOrEqual(1);
+    expect(outcome.specHash).toBeTruthy();
   });
 });
 

@@ -5,7 +5,20 @@
  */
 import { readStatus, type StatusView } from './state';
 
-export const TERMINAL_STATES = ['succeeded', 'rolled_back', 'needs_manual', 'rollback_failed', 'refused'] as const;
+/**
+ * 子进程**结束**时可能停在的状态。
+ *
+ * `awaiting_confirmation` 也在其中：两阶段确认下子进程在阶段 1 就跑完并存状态退出，
+ * 不在这里结束等待的话，`--wait` 会一直轮询到 45 分钟超时。
+ */
+export const TERMINAL_STATES = [
+  'succeeded',
+  'rolled_back',
+  'needs_manual',
+  'rollback_failed',
+  'awaiting_confirmation',
+  'refused',
+] as const;
 
 export function isTerminal(state: string): boolean {
   return (TERMINAL_STATES as readonly string[]).includes(state);

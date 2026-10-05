@@ -2,8 +2,13 @@
  * 全色域干跑（docs/ADMIN.md §3.3 阶段 0，S0.3 + S0.4）。
  *
  * **它跑在任何写盘之前**——这套设计最重要的一道防线：`hits === 0`、恒真、
- * `check` 抛异常、与既有徽章构成 `group` 外的必然蕴含，都在这道门被拦下，
+ * `check` 抛异常、**互相蕴含**（A ≡ B，同一条规则写了两个名字），都在这道门被拦下，
  * 工作区**零改动**。
+ *
+ * **单向蕴含是警告，不是错误**：部分包含是徽章系统的固有性质——任何更稀有的徽章
+ * 必然被更宽的徽章包含。严格拒绝会让越稀有的徽章越加不进去，而那是徽章最有价值的一头。
+ * 所以 A ⊆ B / B ⊆ A 只进 `warnings`（等待人确认一次），`implications[].level` 决定级别：
+ * `equal → error`、单向 `→ warning`、同 group `→ allowed`。
  *
  * 循环与 `toColorInfo` 与 `packages/shared/scripts/enumerate.test.ts` **完全同口径**
  * （`v = 0 … N-1`，`r=(v>>16)&255, g=(v>>8)&255, b=v&255`），否则 hits 对不上。
@@ -30,6 +35,45 @@ export interface Implication {
   jaccard: number;
   /** 同一个非空 group 内的蕴含是**允许**的（阶梯规则）。 */
   allowed: boolean;
+  /**
+   * 判定级别（本次改动的核心）：
+   *   - `equal`（A ≡ B，互相蕴含）→ **`error`**：同一条规则写了两个名字，会双倍计分，
+   *     group 救不了，必须删掉或改写其一；
+   *   - 单向蕴含（A ⊆ B 或 B ⊆ A）→ **`warning`**：部分包含是徽章系统的固有性质
+   *     （越稀有的徽章越必然被更宽的徽章包含），**不阻止写入**；
+   *   - 同一个非空 group 内 → **`allowed`**：阶梯关系的显式表达，既不算错也不算警告。
+   */
+  level: 'error' | 'warning' | 'allowed';
+}
+
+/** 由 `allowed` + `direction` 直接导出级别（单条与批量共用同一口径）。 */
+export function implicationLevel(
+  direction: Implication['direction'] | PairwiseImplication['direction'],
+  allowed: boolean,
+): Implication['level'] {
+  if (allowed) return 'allowed';
+  return direction === 'equal' ? 'error' : 'warning';
+}
+
+/** 互相蕴含（真冗余）的拒绝文案。`scope` 说明对方是既有徽章还是同批新徽章。 */
+export function equalImplicationMessage(otherId: string, item: { direction: string; cohits: number; jaccard: number }): string {
+  return `与 "${otherId}" 构成必然蕴含（${item.direction}，共命中 ${item.cohits} 色，Jaccard=${item.jaccard.toFixed(4)}）`
+    + '且不在同一个 group 里：**互相蕴含 = 同一条规则写了两个名字**（会双倍计分），group 救不了等价关系，'
+    + '必须删掉或改写其一。';
+}
+
+/**
+ * 单向蕴含的**警告**文案（不是错误）。必须写清四件事：
+ * 方向 / 共命中数 / Jaccard / 对方 id；并明确写出「这是警告不是错误」。
+ */
+export function subsetWarningMessage(
+  subject: string,
+  otherId: string,
+  item: { direction: string; cohits: number; jaccard: number },
+): string {
+  return `⚠ 警告，不是错误：${subject}与 "${otherId}" 构成单向蕴含（${item.direction}，共命中 ${item.cohits} 色，`
+    + `Jaccard=${item.jaccard.toFixed(4)}）。部分包含是徽章系统的固有性质——任何更稀有的徽章必然被更宽的徽章包含；`
+    + '可以用同一个 group 表达阶梯关系，但**不是必须**，这不阻止写入。';
 }
 
 export interface DryRunResult {
@@ -43,8 +87,10 @@ export interface DryRunResult {
   empty: boolean;
   maxJaccard: { id: string; value: number } | null;
   implications: Implication[];
-  /** 人类可读的拒绝理由；为空表示干跑通过。 */
+  /** 人类可读的**硬错误**拒绝理由；为空表示干跑没有拦住。 */
   violations: string[];
+  /** 单向蕴含警告（**不阻止写入**，需要人确认）。 */
+  warnings: string[];
   /** 命中/未命中样例（失败时打印，便于一眼看出条件写反了）。 */
   samples: { hits: string[]; misses: string[] };
 }
@@ -135,17 +181,20 @@ export function runDryRun(options: DryRunOptions): DryRunResult {
       const oldSubset = co === badge.hits && badge.hits > 0;
       if (!newSubset && !oldSubset) return;
       const allowed = group !== null && badge.group === group;
+      const direction = newSubset && oldSubset ? 'equal' : newSubset ? 'new-subset-of-old' : 'old-subset-of-new';
       implications.push({
         id: badge.id,
-        direction: newSubset && oldSubset ? 'equal' : newSubset ? 'new-subset-of-old' : 'old-subset-of-new',
+        direction,
         cohits: co,
         jaccard,
         allowed,
+        level: implicationLevel(direction, allowed),
       });
     });
   }
 
   const violations: string[] = [];
+  const warnings: string[] = [];
   if (exception) {
     violations.push(`check 在第 ${exception.index} 个颜色上抛异常：${exception.message}`);
   }
@@ -159,11 +208,10 @@ export function runDryRun(options: DryRunOptions): DryRunResult {
     if (hitCount === 0) violations.push(`hits === 0：这条规则在全色域（${total} 色）里永不命中。`);
     if (hitCount === total) violations.push(`hits === 全色域（${total}）：条件恒真，等于白送分。`);
     for (const item of implications) {
-      if (!item.allowed) {
-        violations.push(
-          `与既有徽章 "${item.id}" 构成必然蕴含（${item.direction}，共命中 ${item.cohits} 色，Jaccard=${item.jaccard.toFixed(4)}）`
-          + '且不在同一个 group 里：应改宽/改窄判定，或用 group 表达阶梯关系。',
-        );
+      if (item.level === 'error') {
+        violations.push(equalImplicationMessage(item.id, item) + '（对方是既有徽章）');
+      } else if (item.level === 'warning') {
+        warnings.push(subsetWarningMessage('', item.id, item));
       }
     }
   }
@@ -178,6 +226,7 @@ export function runDryRun(options: DryRunOptions): DryRunResult {
     maxJaccard,
     implications,
     violations,
+    warnings,
     samples: { hits, misses },
   };
 }
@@ -212,7 +261,10 @@ export interface CandidateDryRun {
   empty: boolean;
   maxJaccard: DryRunResult['maxJaccard'];
   implications: Implication[];
+  /** 该候选自己的**硬错误**。 */
   violations: string[];
+  /** 该候选自己的单向蕴含警告（不阻止写入）。 */
+  warnings: string[];
   samples: DryRunResult['samples'];
 }
 
@@ -225,6 +277,8 @@ export interface PairwiseImplication {
   jaccard: number;
   /** 同一个非空 group 内的蕴含是允许的（阶梯规则），与单条逻辑口径一致。 */
   allowed: boolean;
+  /** 与单条一致：equal → error；单向 → warning；同组 → allowed。 */
+  level: Implication['level'];
 }
 
 export interface BatchDryRunResult {
@@ -232,8 +286,10 @@ export interface BatchDryRunResult {
   candidates: CandidateDryRun[];
   /** 新 vs 新：所有构成蕴含的候选对（含同组豁免的）。 */
   pairwise: PairwiseImplication[];
-  /** 整批的拒绝理由；为空表示整批通过。 */
+  /** 整批的**硬错误**；为空表示整批没有被拦住。 */
   violations: string[];
+  /** 整批的单向蕴含警告（**不阻止写入**，需要人确认一次）。 */
+  warnings: string[];
 }
 
 export interface BatchDryRunOptions {
@@ -311,6 +367,7 @@ export function runBatchDryRun(options: BatchDryRunOptions): BatchDryRunResult {
 
   const results: CandidateDryRun[] = [];
   const violations: string[] = [];
+  const warnings: string[] = [];
 
   for (let i = 0; i < n; i += 1) {
     const candidate = candidates[i]!;
@@ -333,17 +390,20 @@ export function runBatchDryRun(options: BatchDryRunOptions): BatchDryRunResult {
         const oldSubset = co === old.hits && old.hits > 0;
         if (!newSubset && !oldSubset) continue;
         const allowed = candidate.group !== null && old.group === candidate.group;
+        const direction = newSubset && oldSubset ? 'equal' : newSubset ? 'new-subset-of-old' : 'old-subset-of-new';
         implications.push({
           id: old.id,
-          direction: newSubset && oldSubset ? 'equal' : newSubset ? 'new-subset-of-old' : 'old-subset-of-new',
+          direction,
           cohits: co,
           jaccard,
           allowed,
+          level: implicationLevel(direction, allowed),
         });
       }
     }
 
     const own: string[] = [];
+    const ownWarnings: string[] = [];
     if (exception) {
       own.push(`徽章 "${candidate.id}" 的 check 在第 ${exception.index} 个颜色上抛异常：${exception.message}`);
     }
@@ -357,11 +417,10 @@ export function runBatchDryRun(options: BatchDryRunOptions): BatchDryRunResult {
       if (hitCount === 0) own.push(`徽章 "${candidate.id}"：hits === 0——这条规则在全色域（${total} 色）里永不命中。`);
       if (hitCount === total) own.push(`徽章 "${candidate.id}"：hits === 全色域（${total}）——条件恒真，等于白送分。`);
       for (const item of implications) {
-        if (!item.allowed) {
-          own.push(
-            `徽章 "${candidate.id}" 与既有徽章 "${item.id}" 构成必然蕴含（${item.direction}，共命中 ${item.cohits} 色，`
-            + `Jaccard=${item.jaccard.toFixed(4)}）且不在同一个 group 里：应改宽/改窄判定，或用 group 表达阶梯关系。`,
-          );
+        if (item.level === 'error') {
+          own.push(equalImplicationMessage(item.id, item) + `（对方是既有徽章；新徽章 "${candidate.id}"）`);
+        } else if (item.level === 'warning') {
+          ownWarnings.push(subsetWarningMessage(`徽章 "${candidate.id}"：`, item.id, item));
         }
       }
     }
@@ -378,9 +437,11 @@ export function runBatchDryRun(options: BatchDryRunOptions): BatchDryRunResult {
       maxJaccard,
       implications,
       violations: own,
+      warnings: ownWarnings,
       samples: { hits: sampleHits[i]!, misses: sampleMisses[i]! },
     });
     violations.push(...own);
+    warnings.push(...ownWarnings);
   }
 
   // ── 新 vs 新：N×N 两两检查（批量特有的反冗余门）────────────────
@@ -405,17 +466,30 @@ export function runBatchDryRun(options: BatchDryRunOptions): BatchDryRunResult {
       const jaccard = union > 0 ? co / union : 0;
       const allowed = a.group !== null && a.group === b.group;
       const direction = aSubset && bSubset ? 'equal' : aSubset ? 'a-subset-of-b' : 'b-subset-of-a';
-      const item: PairwiseImplication = { a: a.id, b: b.id, direction, cohits: co, jaccard, allowed };
+      const item: PairwiseImplication = {
+        a: a.id,
+        b: b.id,
+        direction,
+        cohits: co,
+        jaccard,
+        allowed,
+        level: implicationLevel(direction, allowed),
+      };
       pairwise.push(item);
-      if (!allowed) {
-        const why = direction === 'equal' ? '两条规则完全等价' : `"${direction === 'a-subset-of-b' ? a.id : b.id}" 是另一条的子集`;
+      if (item.level === 'error') {
         violations.push(
-          `新徽章 "${a.id}" 与 "${b.id}" 之间构成必然蕴含（${why}，共命中 ${co} 色，Jaccard=${jaccard.toFixed(4)}）`
-          + '且不在同一个 group 里：两条会同时命中、双倍计分，应合并/改宽改窄，或用同一个 group 表达阶梯关系。',
+          `新徽章 "${a.id}" 与 "${b.id}" 之间构成必然蕴含（两条规则完全等价，共命中 ${co} 色，Jaccard=${jaccard.toFixed(4)}）`
+          + '且不在同一个 group 里：两条会同时命中、双倍计分，必须合并/改写其一（group 救不了等价关系）。',
+        );
+      } else if (item.level === 'warning') {
+        const narrow = direction === 'a-subset-of-b' ? a.id : b.id;
+        warnings.push(
+          subsetWarningMessage(`新徽章 "${a.id}" 与 "${b.id}"（"${narrow}" 是另一条的子集）：`, item.a === narrow ? b.id : a.id, item)
+            + `（对方是同批新徽章；共命中 ${co} 色）`,
         );
       }
     }
   }
 
-  return { total, candidates: results, pairwise, violations };
+  return { total, candidates: results, pairwise, violations, warnings };
 }

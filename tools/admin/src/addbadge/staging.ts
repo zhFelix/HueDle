@@ -20,9 +20,9 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
-import { ADD_BADGE_OUT_DIR, ensureOutDirs } from './state';
+import { ADD_BADGE_OUT_DIR, ensureOutDirs, readStatus } from './state';
 import { SpecError, parseBadgeSpec, type BadgeSpec } from './spec';
-import { makeBatchRunId, submitBadgeBatchJob, type SpawnFn, type SubmitResult } from './submit';
+import { makeBatchRunId, makeRunId, submitBadgeBatchJob, submitBadgeJob, type SpawnFn, type SubmitResult } from './submit';
 import { recordBatchSubmitted } from './history';
 
 /** 表单里的一条草稿：**原始字符串**，不做任何解析/校验。 */
@@ -232,5 +232,92 @@ export function runStagedBatch(options: RunStagedOptions): SubmitResult {
     specs: specs.map(item => ({ id: item.id, name: item.name, family: item.family })),
   });
   clearStaging(adminRoot);
+  return result;
+}
+
+export interface ContinueStagedOptions {
+  adminRoot: string;
+  root: string;
+  /** 测试注入：不真的拉起 detached 子进程。 */
+  spawn?: SpawnFn;
+  now?: () => Date;
+  /**
+   * 浏览器带回来的**已确认内容哈希**（就是待确认状态里的 `specHash`）。
+   * 缺省时用待确认状态里的值；显式传一个旧哈希可以模拟「确认后改了 spec」。
+   */
+  acceptedSpecHash?: string;
+}
+
+/**
+ * **「继续」**：把停在【待确认】的那一批**重新提交**，带上已接受的内容哈希。
+ *
+ * 为什么是「新起一次运行」而不是「让子进程继续」：管道跑在 detached 子进程里，
+ * 停在待确认等输入 = 留一个没人管的进程。所以阶段 1 跑完就写状态、正常退出；
+ * 「继续」在这里读回**同一个作业文件**（spec 原样），以 `acceptedSpecHash` 再提交一次。
+ *
+ * 代价是重跑一次干跑（只几秒）。确认绑在内容哈希上：作业文件里的 spec 变了，
+ * 重算的哈希就对不上，确认自动作废、重新给警告。
+ */
+export function continuePendingBatch(options: ContinueStagedOptions): SubmitResult {
+  const { adminRoot, root } = options;
+  const view = readStatus(adminRoot);
+  const status = view.status;
+  if (!status) {
+    return { ok: false, exitCode: 2, reason: '没有可继续的作业：状态文件不存在。' };
+  }
+  if (status.state !== 'awaiting_confirmation') {
+    return {
+      ok: false,
+      exitCode: 2,
+      reason: `当前状态是 "${status.state}"，没有等待确认的批次；只有【待确认】的批次可以「继续」。`,
+    };
+  }
+  const acceptedSpecHash = options.acceptedSpecHash ?? status.specHash;
+  if (!acceptedSpecHash) {
+    return { ok: false, exitCode: 2, reason: '待确认状态缺少 spec 内容哈希，拒绝继续（请重新统一跑）。' };
+  }
+
+  const paths = ensureOutDirs(adminRoot);
+  const jobPath = join(paths.jobsDir, `${status.runId}.json`);
+  if (!existsSync(jobPath)) {
+    return { ok: false, exitCode: 2, reason: `找不到待确认批次的作业文件：${jobPath}（请重新统一跑）。` };
+  }
+  let payload: { spec?: unknown; specs?: unknown[] };
+  try {
+    payload = JSON.parse(readFileSync(jobPath, 'utf8')) as { spec?: unknown; specs?: unknown[] };
+  } catch (err) {
+    return { ok: false, exitCode: 2, reason: `待确认批次的作业文件损坏：${err instanceof Error ? err.message : String(err)}` };
+  }
+
+  const rawSpecs = Array.isArray(payload.specs) ? payload.specs : payload.spec !== undefined ? [payload.spec] : [];
+  if (rawSpecs.length === 0) {
+    return { ok: false, exitCode: 2, reason: '待确认批次的作业文件里没有 spec，无法继续。' };
+  }
+  const specs: BadgeSpec[] = [];
+  for (const [index, raw] of rawSpecs.entries()) {
+    try {
+      specs.push(parseBadgeSpec(raw, `待确认作业 specs[${index}]`));
+    } catch (err) {
+      return { ok: false, exitCode: 2, reason: `待确认作业里的 spec 无法解析：${err instanceof Error ? err.message : String(err)}` };
+    }
+  }
+
+  const now = options.now?.() ?? new Date();
+  const isBatch = specs.length > 1;
+  const runId = isBatch ? makeBatchRunId(specs, now) : makeRunId(specs[0]!, now);
+  const logPath = join(paths.logsDir, `${runId}.log`);
+  const spawn = options.spawn ? { spawn: options.spawn } : {};
+  const result = isBatch
+    ? submitBadgeBatchJob({ rawSpecs, specs, root, adminRoot, runId, logPath, acceptedSpecHash, ...spawn })
+    : submitBadgeJob({ rawSpec: rawSpecs[0], spec: specs[0]!, root, adminRoot, runId, logPath, acceptedSpecHash, ...spawn });
+  if (!result.ok) return result;
+
+  recordBatchSubmitted(adminRoot, {
+    runId,
+    createdAt: now.toISOString(),
+    startedAt: now.toISOString(),
+    state: 'running',
+    specs: specs.map(item => ({ id: item.id, name: item.name, family: item.family })),
+  });
   return result;
 }

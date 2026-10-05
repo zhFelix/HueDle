@@ -61,6 +61,11 @@ export interface SubmitOptions {
   runId: string;
   /** 检出 stale 锁（上一次没跑完）时，是否强制接管。默认 false → 拒绝并报告。 */
   force?: boolean;
+  /**
+   * 「继续」：被接受的单向蕴含警告所对应的 spec 内容哈希。
+   * 与作业里 spec 重算出的哈希不匹配 → 确认作废、重新停在待确认。
+   */
+  acceptedSpecHash?: string;
   spawn?: SpawnFn;
 }
 
@@ -73,6 +78,7 @@ export interface BatchSubmitOptions {
   logPath: string;
   runId: string;
   force?: boolean;
+  acceptedSpecHash?: string;
   spawn?: SpawnFn;
 }
 
@@ -106,6 +112,7 @@ export function submitBadgeJob(options: SubmitOptions): SubmitResult {
     logPath: options.logPath,
     runId: options.runId,
     ...(options.force !== undefined ? { force: options.force } : {}),
+    ...(options.acceptedSpecHash !== undefined ? { acceptedSpecHash: options.acceptedSpecHash } : {}),
     ...(options.spawn ? { spawn: options.spawn } : {}),
   });
 }
@@ -121,6 +128,7 @@ export function submitBadgeBatchJob(options: BatchSubmitOptions): SubmitResult {
     logPath: options.logPath,
     runId: options.runId,
     ...(options.force !== undefined ? { force: options.force } : {}),
+    ...(options.acceptedSpecHash !== undefined ? { acceptedSpecHash: options.acceptedSpecHash } : {}),
     ...(options.spawn ? { spawn: options.spawn } : {}),
   });
 }
@@ -134,6 +142,7 @@ interface InternalSubmitOptions {
   logPath: string;
   runId: string;
   force?: boolean;
+  acceptedSpecHash?: string;
   spawn?: SpawnFn;
 }
 
@@ -182,8 +191,20 @@ function submitJob(options: InternalSubmitOptions): SubmitResult {
   const paths = addBadgePaths(adminRoot);
   const jobPath = join(paths.jobsDir, `${runId}.json`);
   const payload = options.batch
-    ? { runId, specs: options.rawSpecs, logPath, startedAt: new Date().toISOString() }
-    : { runId, spec: options.rawSpecs[0], logPath, startedAt: new Date().toISOString() };
+    ? {
+        runId,
+        specs: options.rawSpecs,
+        logPath,
+        startedAt: new Date().toISOString(),
+        ...(options.acceptedSpecHash !== undefined ? { acceptedSpecHash: options.acceptedSpecHash } : {}),
+      }
+    : {
+        runId,
+        spec: options.rawSpecs[0],
+        logPath,
+        startedAt: new Date().toISOString(),
+        ...(options.acceptedSpecHash !== undefined ? { acceptedSpecHash: options.acceptedSpecHash } : {}),
+      };
   writeFileSync(jobPath, JSON.stringify(payload, null, 2), 'utf8');
 
   // ④ 抢锁。stale + force 时先接管。
