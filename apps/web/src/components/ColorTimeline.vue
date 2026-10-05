@@ -17,18 +17,21 @@
  *   - 折行**在纯函数层**算（`layoutTimeline(days, perRow)`），每行一个 `<ol>`，
  *     行与行之间有垂直间距。所以「行尾」和「下一行行首」是两个不同的 `<ol>`，
  *     物理上没有相邻关系。
- *   - 渐变是**每一格自己的左侧填缝**（`link`），只有当「同一行内、日历上相邻、
+ *   - 渐变**就是有记录那格自己的背景**（`link`），只有当「同一行内、日历上相邻、
  *     且两天都有记录」时才存在。缺口那格不会产生 `link`，链条在缺口处天然断开；
- *     行首那格的 `link` 恒为 `null`，所以**行尾收在当天颜色**，不向下一行发散。
+ *     行首那格的 `link` 恒为 `null`，所以每行都从一块实心当天色开始，**不继承
+ *     上一行的颜色**。
  *
- * `link` 只描述「左边」，没有对应的「右边」——行尾不需要任何特判，它本来就不带
- * 指向下一行的东西。
+ * 渐变画在**较晚那格**身上（`link` 正属于它）：它的左端是前一天的颜色、右端是
+ * 当天颜色。因为格子相邻（没有填缝、没有间距），一格右端 == 下一格左端，整条
+ * 于是是一条连续色带，而不是「色块 + 接缝」。代价是：一天的颜色只在它与前一天的
+ * **交界处**是精确的（精确值在悬停提示和下面的颜色历史里，时间线表达的是流动）。
  *
  * ── 每行放几格：按容器宽度实测 ──────────────────────────────────────────────
  *
  * 固定天数（比如每行 30 天）在窄屏上照样溢出，等于没解决「一条放不下」；所以
- * 容量由 `ResizeObserver` 实测容器宽度算出：每格 18px（6px 填缝 + 12px 色块），
- * 容量 = `floor(宽 / 18)`。
+ * 容量由 `ResizeObserver` 实测容器宽度算出：每格 12px（格子相邻，不再有填缝），
+ * 容量 = `floor(宽 / 12)`。
  * 每格宽度相同，因此各行的列是对齐的、行长可比（只有最后一行是残行）。
  * 宽度未知时（未挂载 / jsdom / 隐藏）退回 `DEFAULT_DAYS_PER_ROW`；
  * `perRow` prop 可以固定容量，供测试与嵌入方使用。
@@ -58,6 +61,7 @@ import {
   layoutTimeline,
   timelineAriaLabel,
   timelineTitle,
+  type TimelineCell,
 } from '../lib/timeline';
 
 const props = defineProps<{
@@ -75,9 +79,8 @@ const props = defineProps<{
 /** 滚动容器（横竖都滚：横向兜底，纵向是「多行 + 限高」）。 */
 const scroller = ref<HTMLElement | null>(null);
 
-/** 色块宽度 `w-3` 与填缝（渐变）宽度 `w-1.5`，单位 px；改 class 时这里要同步。 */
+/** 色块宽度 `w-3`，单位 px；改 class 时这里要同步。格子相邻，没有填缝。 */
 const CELL_PX = 12;
-const LINK_PX = 6;
 
 /** 容器实测出来的每行容量；宽度未知时保持 `null`，由 `DEFAULT_DAYS_PER_ROW` 兜底。 */
 const measuredPerRow = ref<number | null>(null);
@@ -94,12 +97,29 @@ const perRow = computed(() => props.perRow ?? measuredPerRow.value ?? DEFAULT_DA
 const rows = computed(() => layoutTimeline(days.value, perRow.value));
 
 /**
+ * 一格有记录那天的背景。
+ *
+ *   - 有 `link`（同一行内、日历上相邻、且前面一天也有记录）→ 整格就是从
+ *     `link.from`（前一天）到 `link.to`（当天）的渐变。格子的右端正好是当天色，
+ *     也就是下一格渐变（或实心当天色）的左端 ⇒ 整条连续，没有实心块。
+ *   - 没有 `link`（行首 / 缺口之后 / 单天）→ **实心当天色**，硬边。没有可以
+ *     过渡的对象，就不该假装有。
+ *
+ * 缺口那格根本不走这里（模板里是另一个 `<span>`，且 `link` 恒为 `null`）。
+ */
+function entryStyle(cell: TimelineCell): Record<string, string> {
+  if (cell.day.kind !== 'entry') return {};
+  return cell.link === null
+    ? { backgroundColor: cell.day.hex }
+    : { backgroundImage: `linear-gradient(to right, ${cell.link.from}, ${cell.link.to})` };
+}
+
+/**
  * 按容器实测宽度算「一行放几格」。
  *
- * 每格占「6px 左填缝 + 12px 色块」= 18px（行首那格也带填缝，各行才对齐），
- * 所以容量是 `floor(宽 / 18)`——**不留余量会把整行撑出 2px 横向溢出**，
- * 那会凭空多出一条横滚动条。宽度为 0（未挂载 / jsdom / 隐藏容器）时不动手，
- * 留给兜底值——绝不算出 0 或 NaN。
+ * 每格 12px、格子相邻 ⇒ 容量是 `floor(宽 / 12)`——**不留余量会把整行撑出
+ * 2px 横向溢出**，那会凭空多出一条横滚动条。宽度为 0（未挂载 / jsdom / 隐藏容器）
+ * 时不动手，留给兜底值——绝不算出 0 或 NaN。
  */
 function measurePerRow(): void {
   if (props.perRow !== undefined) return;
@@ -109,9 +129,7 @@ function measurePerRow(): void {
 
   const width = el.clientWidth;
   measuredPerRow.value =
-    Number.isFinite(width) && width > 0
-      ? Math.max(1, Math.floor(width / (CELL_PX + LINK_PX)))
-      : null;
+    Number.isFinite(width) && width > 0 ? Math.max(1, Math.floor(width / CELL_PX)) : null;
 }
 
 /** 滚到最右下 = 最新。无溢出时也无害（`scrollTop` 会被夹到 0）。 */
@@ -192,44 +210,31 @@ watch(rows, () => {
           :data-testid="'timeline-row'"
         >
           <!--
-            每格带 6px 左填缝（`ml-1.5`），所以各行的列是对齐的：行首也多这 6px，
-            但它不画渐变（`link === null`），行尾则根本没有指向下一行的元素。
+            格子相邻（没有 `ml-1.5` 填缝）：格 N 的右端就是格 N+1 的左端，
+            所以有 link 的格子整格是渐变时，整条是一条连续色带。
+            行首那格 `link === null`，是实心当天色，不继承上一行的颜色。
           -->
           <li
             v-for="cell in row.cells"
             :key="cell.day.date"
-            class="relative ml-1.5 w-3 shrink-0"
+            class="w-3 shrink-0"
             :data-testid="'timeline-cell'"
             :data-cell-date="cell.day.date"
             :data-row-start="cell.isRowStart ? 'true' : 'false'"
           >
-            <!--
-              渐变填缝：只连「同一行内、相邻且都有记录」的两天。
-              纯装饰，从无障碍树里摘掉（信息由两侧色块的 title / aria-label 给出）。
-            -->
-            <span
-              v-if="cell.link"
-              class="absolute inset-y-0 right-full w-1.5"
-              aria-hidden="true"
-              data-testid="timeline-link"
-              :data-from="cell.link.from"
-              :data-to="cell.link.to"
-              :style="{
-                backgroundImage: `linear-gradient(to right, ${cell.link.from}, ${cell.link.to})`,
-              }"
-            ></span>
-
             <button
               v-if="cell.day.kind === 'entry'"
               type="button"
-              class="block h-full w-3 rounded-sm border border-white/10 transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
+              class="block h-full w-3 transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
               :class="{ 'ring-2 ring-amber-400': cell.day.isToday }"
-              :style="{ backgroundColor: cell.day.hex }"
+              :style="entryStyle(cell)"
               :title="timelineTitle(cell.day)"
               :aria-label="timelineAriaLabel(cell.day)"
               :data-testid="'timeline-day'"
               :data-date="cell.day.date"
               :data-today="cell.day.isToday ? 'true' : 'false'"
+              :data-from="cell.link?.from"
+              :data-to="cell.link?.to"
             ></button>
 
             <!-- 缺口：占位但不上色（虚线灰块）。纯装饰，从无障碍树里摘掉 -->

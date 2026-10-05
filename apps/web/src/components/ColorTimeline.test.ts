@@ -331,16 +331,28 @@ function cells(root: HTMLElement): HTMLElement[] {
 function linkFromPerCell(root: HTMLElement): (string | null)[] {
   return cells(root).map(
     cell =>
-      cell.querySelector<HTMLElement>('[data-testid="timeline-link"]')?.getAttribute('data-from') ??
+      cell.querySelector<HTMLElement>('[data-testid="timeline-day"][data-from]')?.getAttribute('data-from') ??
       null,
   );
 }
 
-/** 所有渐变段的 `from→to` 对，按 DOM 顺序。 */
+/** 所有渐变段的 `from→to` 对，按 DOM 顺序（由 DOM 顺序上的渐变格子带出）。 */
 function linkPairs(root: HTMLElement): string[] {
-  return [...root.querySelectorAll<HTMLElement>('[data-testid="timeline-link"]')].map(
-    link => `${link.dataset.from}->${link.dataset.to}`,
-  );
+  return [
+    ...root.querySelectorAll<HTMLElement>('[data-testid="timeline-day"][data-from]'),
+  ].map(link => `${link.dataset.from}->${link.dataset.to}`);
+}
+
+/** 一格渲染出来的背景（渐变格是 backgroundImage，实心格是 backgroundColor）。 */
+function backgroundOf(cell: HTMLElement): string {
+  const block = cell.querySelector<HTMLElement>('[data-testid="timeline-day"]');
+  if (block === null) return cell.querySelector<HTMLElement>('[data-testid="timeline-gap"]')?.style.cssText ?? '';
+  return `${block.style.backgroundImage} ${block.style.backgroundColor}`.trim();
+}
+
+/** 一格是不是渐变（背景里真的含 `linear-gradient`）。 */
+function isFading(cell: HTMLElement): boolean {
+  return backgroundOf(cell).includes('linear-gradient');
 }
 
 /** 折行后的每一行（`<ol>`）。 */
@@ -349,14 +361,20 @@ function rowLists(root: HTMLElement): HTMLOListElement[] {
 }
 
 describe('⑧ 渐变：相邻有记录的两天之间有过渡', () => {
-  it('相邻两天 → 后一格有一段 `#111111 → #222222` 的 linear-gradient', async () => {
+  it('相邻两天 → 后一格整格是 `#111111 → #222222` 的 linear-gradient，前一行首格实心', async () => {
     const root = await mountWith(
       [item('2026-03-01', { hex: '#111111' }), item('2026-03-02', { hex: '#222222' })],
       '2026-03-02',
       undefined,
     );
 
-    const links = [...root.querySelectorAll<HTMLElement>('[data-testid="timeline-link"]')];
+    // 行首（03-01）没有可过渡的对象 → 实心当天色。
+    expect(cells(root)[0]?.querySelector<HTMLElement>('[data-testid="timeline-day"]')?.style.backgroundColor)
+      .toBe('rgb(17, 17, 17)');
+    expect(isFading(cells(root)[0]!)).toBe(false);
+
+    // 03-02 带 link → 整格是 `#111111 → #222222` 的渐变。
+    const links = [...root.querySelectorAll<HTMLElement>('[data-testid="timeline-day"][data-from]')];
     expect(links).toHaveLength(1);
     expect(links[0]?.dataset.from).toBe('#111111');
     expect(links[0]?.dataset.to).toBe('#222222');
@@ -366,6 +384,9 @@ describe('⑧ 渐变：相邻有记录的两天之间有过渡', () => {
     expect(bg).toContain('linear-gradient');
     expect(bg).toContain('rgb(17, 17, 17)');
     expect(bg).toContain('rgb(34, 34, 34)');
+
+    // 6px 填缝那种独立元素已经没有了：渐变就是格子本体。
+    expect(root.querySelectorAll('[data-testid="timeline-link"]')).toHaveLength(0);
   });
 
   it('单天 → 没有任何渐变段', async () => {
@@ -448,16 +469,23 @@ describe('⑩ 折行：容量 → 行数正确，且**换行处不出现渐变**
       '#000005->#000006',
     ]);
 
-    // 行首那格：显式标了 row-start，且左侧没有渐变元素。
+    // 行首那格：显式标了 row-start、link 为 null，于是是实心当天色——
+    // 绝不继承上一行行尾的颜色（这就是「换行处不发散」）。
     const startOfSecondRow = lists[1]?.querySelector<HTMLElement>('[data-testid="timeline-cell"]');
     expect(startOfSecondRow?.dataset.rowStart).toBe('true');
-    expect(startOfSecondRow?.querySelector('[data-testid="timeline-link"]')).toBeNull();
+    expect(
+      startOfSecondRow?.querySelector<HTMLElement>('[data-testid="timeline-day"]')?.getAttribute('data-from'),
+    ).toBeNull();
+    expect(isFading(startOfSecondRow!)).toBe(false);
+    expect(backgroundOf(startOfSecondRow!)).toContain('rgb(0, 0, 4)');
+    expect(backgroundOf(startOfSecondRow!)).not.toContain('rgb(0, 0, 3)');
 
-    // 行尾那格（第一行最后一个）只会带「来自左边」的渐变，绝不带指向下一行的东西。
+    // 行尾那格（第一行最后一个）的渐变收在当天色上，绝不指向下一行的第一天。
     const endOfFirstRow = [...(lists[0]?.querySelectorAll<HTMLElement>('[data-testid="timeline-cell"]') ?? [])].pop();
-    expect(endOfFirstRow?.querySelector('[data-testid="timeline-link"]')?.getAttribute('data-to')).toBe(
-      '#000003',
-    );
+    expect(
+      endOfFirstRow?.querySelector<HTMLElement>('[data-testid="timeline-day"]')?.getAttribute('data-to'),
+    ).toBe('#000003');
+    expect(backgroundOf(endOfFirstRow!)).not.toContain('rgb(0, 0, 4)');
   });
 
   it('换行数量随容量变化：7 天 / 每行 2 → 4 行（3 / 3 / ... 最后一行 1 格）', async () => {
@@ -608,5 +636,151 @@ describe('⑫ 边界：空历史 / 单天 / 大量断档 不崩、不出现 NaN'
       expect(cells(root).length).toBeGreaterThan(0);
       expect(root.textContent).not.toContain('NaN');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑬ 本轮：渐变是格子本体（不再是 6px 填缝），两条语义一条都不能丢
+// ---------------------------------------------------------------------------
+
+describe('⑬ 每格自己就是渐变：有 link 的格子是渐变，没 link 的格子是实心', () => {
+  /**
+   * 01 / 02 / 缺 03 / 缺 04 / 05 / 06，颜色按位次递增便于断言端点。
+   * 期望（`link` 属于**较晚**那格）：
+   *   01 行首、无 link → 实心 #111111
+   *   02 有 link(#111111→#222222) → 整格渐变
+   *   03/04 缺口 → 虚线灰块，不带任何内联样式
+   *   05 缺口之后、无 link → 实心 #555555（硬边，缺口没有被渐变跨过）
+   *   06 有 link(#555555→#666666) → 整格渐变
+   */
+  async function withGap(): Promise<HTMLDivElement> {
+    return mountWith(
+      [
+        item('2026-03-01', { hex: '#111111' }),
+        item('2026-03-02', { hex: '#222222' }),
+        item('2026-03-05', { hex: '#555555' }),
+        item('2026-03-06', { hex: '#666666' }),
+      ],
+      '2026-03-06',
+      30,
+    );
+  }
+
+  it('① 有 link 的格子背景是渐变：含 linear-gradient，两端就是 link.from / link.to', async () => {
+    const root = await withGap();
+    const [d01, d02, g03, g04, d05, d06] = cells(root);
+
+    for (const cell of [d02!, d06!]) {
+      expect(isFading(cell)).toBe(true);
+      expect(backgroundOf(cell)).toContain('linear-gradient');
+    }
+
+    // 端点色就是两天的颜色（顺序 = 时间前进方向）。
+    expect(backgroundOf(d02!)).toContain('linear-gradient(to right, rgb(17, 17, 17), rgb(34, 34, 34))');
+    expect(backgroundOf(d06!)).toContain('linear-gradient(to right, rgb(85, 85, 85), rgb(102, 102, 102))');
+    expect(d02?.querySelector('[data-testid="timeline-day"]')?.getAttribute('data-to')).toBe('#222222');
+
+    // 行首 / 缺口之后那格没有可过渡的对象 → 实心。
+    for (const cell of [d01!, d05!]) {
+      expect(isFading(cell)).toBe(false);
+    }
+    expect(backgroundOf(d01!)).toContain('rgb(17, 17, 17)');
+    expect(backgroundOf(d05!)).toContain('rgb(85, 85, 85)');
+    expect(g03?.querySelector<HTMLElement>('[data-testid="timeline-gap"]')).not.toBeNull();
+    expect(g04?.querySelector<HTMLElement>('[data-testid="timeline-gap"]')).not.toBeNull();
+  });
+
+  it('② 无 link 的格子是实心（背景里不含 linear-gradient）——行首、单天、缺口', async () => {
+    // 行首：每行 2 格 → 第二行第一格（03-03）是新行的行首。
+    const rowBreak = await mountWith(
+      [
+        item('2026-03-01', { hex: '#111111' }),
+        item('2026-03-02', { hex: '#222222' }),
+        item('2026-03-03', { hex: '#333333' }),
+        item('2026-03-04', { hex: '#444444' }),
+      ],
+      '2026-03-04',
+      2,
+    );
+    const rowStartCells = rowLists(rowBreak).map(list => cells(list)[0]!);
+    expect(rowStartCells).toHaveLength(2);
+
+    for (const cell of rowStartCells) {
+      expect(cell.dataset.rowStart).toBe('true');
+      // 没有 link（行首）→ 实心，背景里没有渐变。
+      expect(isFading(cell)).toBe(false);
+      expect(cell.querySelector('[data-testid="timeline-day"][data-from]')).toBeNull();
+    }
+    expect(backgroundOf(rowStartCells[1]!)).toContain('rgb(51, 51, 51)');
+
+    // 缺口：两端都没有 link，缺口本身也不上色（没有内联样式，自然也没有渐变）。
+    app?.unmount();
+    host?.remove();
+    const gapped = await mountWith(
+      [item('2026-03-04', { hex: '#111111' }), item('2026-03-06', { hex: '#666666' })],
+      '2026-03-06',
+      30,
+    );
+    expect(gaps(gapped)).toHaveLength(1);
+    expect(backgroundOf(cells(gapped)[1]!)).toBe(''); // 缺口：没有内联样式
+    for (const cell of cells(gapped)) {
+      expect(isFading(cell)).toBe(false);
+    }
+
+    // 单天：唯一那格也没有可过渡的对象。
+    app?.unmount();
+    host?.remove();
+    const single = await mountWith([item('2026-03-04', { hex: '#002fa7' })], '2026-03-04', 30);
+    expect(cells(single)).toHaveLength(1);
+    expect(isFading(cells(single)[0]!)).toBe(false);
+    expect(backgroundOf(cells(single)[0]!)).toContain('rgb(0, 47, 167)');
+  });
+
+  it('③ 缺口两侧仍然断开：没有任何渐变的端点跨过缺口（02 → 05 不存在）', async () => {
+    const root = await withGap();
+
+    // 跨缺口的那一对绝不能被连起来：既没有 `#222222 → #555555` 的渐变，
+    // 也没有任何一格的渐变里同时出现缺口的另一端颜色。
+    expect(linkPairs(root)).toEqual(['#111111->#222222', '#555555->#666666']);
+    expect(linkPairs(root)).not.toContain('#222222->#555555');
+    for (const cell of cells(root)) {
+      const bg = backgroundOf(cell);
+      expect(bg.includes('rgb(34, 34, 34)') && bg.includes('rgb(85, 85, 85)')).toBe(false);
+    }
+
+    // 缺口那两格不带任何内联样式（不伪造颜色，也不背渐变）。
+    for (const gap of gaps(root)) {
+      expect(gap.getAttribute('style')).toBeNull();
+    }
+  });
+
+  it('④ 填缝没有了：格子相邻（li 不再带 ml-1.5 填缝，也没有独立的 timeline-link 元素）', async () => {
+    const root = await withGap();
+
+    expect(root.querySelectorAll('[data-testid="timeline-link"]')).toHaveLength(0);
+    for (const cell of cells(root)) {
+      expect(cell.className).not.toContain('ml-1.5');
+    }
+  });
+
+  it('⑤ 折行处不发散：行尾的渐变收在当天色，行首绝不出现上一行行尾的颜色', async () => {
+    const root = await mountWith(
+      [
+        item('2026-03-01', { hex: '#000001' }),
+        item('2026-03-02', { hex: '#000002' }),
+        item('2026-03-03', { hex: '#000003' }),
+        item('2026-03-04', { hex: '#000004' }),
+      ],
+      '2026-03-04',
+      2,
+    );
+    const [row1, row2] = rowLists(root).map(list => cells(list));
+
+    // 行尾（03-02）的渐变右端是它自己，不含下一行第一天（#000003）的颜色。
+    expect(backgroundOf(row1![1]!)).not.toContain('rgb(0, 0, 3)');
+    // 行首（03-03）实心自己，不含上一行行尾（#000002）的颜色。
+    expect(isFading(row2![0]!)).toBe(false);
+    expect(backgroundOf(row2![0]!)).not.toContain('rgb(0, 0, 2)');
+    expect(backgroundOf(row2![0]!)).toContain('rgb(0, 0, 3)');
   });
 });
