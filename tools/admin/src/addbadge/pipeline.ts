@@ -51,6 +51,7 @@ import {
   PHASES,
   addBadgePaths,
   makeStatus,
+  type FailureAttribution,
   type Phase,
   type PipelineState,
   type PipelineStatus,
@@ -146,6 +147,8 @@ export interface PipelineOutcome {
   hits?: number;
   /** 批量模式：每条新徽章的干跑 hits。 */
   hitsBySpec?: Array<{ id: string; hits: number }>;
+  /** 失败归因（树形列表靠它决定「条目上要不要加 ✕」）。 */
+  failureAttribution?: FailureAttribution;
 }
 
 /** 内部：一个已分类的阶段失败。 */
@@ -156,6 +159,8 @@ class PhaseFailure extends Error {
     readonly exitCode: number,
     /** 已写盘才需要回滚；干跑阶段失败时工作区是干净的。 */
     readonly needsRollback: boolean,
+    /** 能指名到某条 spec 时带上，否则留空（树形列表不加条目 ✕）。 */
+    readonly attribution?: FailureAttribution,
   ) {
     super(message);
     this.name = 'PhaseFailure';
@@ -211,6 +216,68 @@ export function findDeadBadge(report: string, id: string): boolean {
   const end = report.indexOf('## 2.', start);
   const section = report.slice(start, end < 0 ? undefined : end);
   return section.includes(`\`${id}\``);
+}
+
+// ───────────────────────── 失败归因（哪一条 spec 的锅） ─────────────────────────
+//
+// 树形列表只在那条「自己引起失败」的条目上加 ✕，所以失败必须能**结构化地**
+// 指名到一条 spec——不能只留在给人看的 conclusion 文本里。以下三个函数把
+// 各阶段的失败输出翻译成 {@link FailureAttribution}：
+//   - 唯一嫌疑 → `kind: 'spec'`（UI 在那个条目上加 ✕）；
+//   - 整批共同引起 / 嫌疑不止一条 / 根本指不出来 → `kind: 'batch'`（UI 什么都不加）。
+
+/** 批量干跑失败：只有**恰好一条**候选自带 violations 时才归因到它。 */
+export function attributeBatchDryRun(
+  specs: readonly BadgeSpec[],
+  result: BatchDryRunResult,
+): FailureAttribution {
+  const failed = result.candidates.filter(candidate => candidate.violations.length > 0);
+  if (failed.length === 1) {
+    const only = failed[0]!;
+    return { kind: 'spec', specId: only.id, reason: only.violations.join('；') };
+  }
+  // 0 条自带 violations：只剩「新 vs 新」的蕴含（点名两条，无法单选）；
+  // >1 条：多条各自的锅。两者都只能当整批失败。
+  return {
+    kind: 'batch',
+    reason: result.violations.join('；') || `批量干跑拒绝了 ${specs.length} 条候选`,
+  };
+}
+
+/** 单条干跑失败：本就只可能是它自己。 */
+export function attributeSingleDryRun(spec: BadgeSpec, violations: readonly string[]): FailureAttribution {
+  return { kind: 'spec', specId: spec.id, reason: violations.join('；') };
+}
+
+/**
+ * `tsc` 失败：从输出里认出被点名的家族文件（`badges/<family>.ts`），
+ * 只落在**恰好一条** spec 上时才归因。
+ */
+export function attributeTypecheck(specs: readonly BadgeSpec[], output: string): FailureAttribution {
+  const families = new Set<string>();
+  for (const match of output.matchAll(/badges\/([a-z]+)\.ts/g)) families.add(match[1]!);
+  const hit = specs.filter(spec => families.has(spec.family));
+  const reason = `tsc --noEmit 失败：${tail(output, 3)}`;
+  if (hit.length === 1) return { kind: 'spec', specId: hit[0]!.id, reason };
+  return { kind: 'batch', reason };
+}
+
+/**
+ * `enumerate` 失败：分位平衡类是**整批共同引起**的（定义如此，绝不归因到单条）；
+ * 其余情况看输出里出现了哪个新 id——唯一一个才归因。
+ */
+export function attributeEnumerate(
+  specs: readonly BadgeSpec[],
+  output: string,
+  failureClass: string,
+): FailureAttribution {
+  const reason = `${failureClass}：${tail(output, 3)}`;
+  if (failureClass === 'enumerate-global-balance') {
+    return { kind: 'batch', reason: `分位平衡类失败（整批共同引起，无法归因到单条）：${tail(output, 3)}` };
+  }
+  const mentioned = specs.filter(spec => output.includes(spec.id));
+  if (mentioned.length === 1) return { kind: 'spec', specId: mentioned[0]!.id, reason };
+  return { kind: 'batch', reason };
 }
 
 export function md5OfFile(path: string): string {
@@ -307,7 +374,7 @@ function runPipelineCore(
     exitCode: number,
     conclusion: string,
     failureClass?: string,
-    extra?: { snapshotPath?: string },
+    extra?: { snapshotPath?: string; attribution?: FailureAttribution },
   ): PipelineOutcome => {
     status.state = state;
     status.phase = 'done';
@@ -316,6 +383,7 @@ function runPipelineCore(
     status.conclusion = conclusion;
     status.finishedAt = deps.now().toISOString();
     if (extra?.snapshotPath) status.snapshotPath = extra.snapshotPath;
+    if (extra?.attribution) status.failureAttribution = extra.attribution;
     publish();
     return {
       exitCode,
@@ -324,6 +392,7 @@ function runPipelineCore(
       conclusion,
       evidence,
       ...(extra?.snapshotPath ? { snapshotPath: extra.snapshotPath } : {}),
+      ...(status.failureAttribution ? { failureAttribution: status.failureAttribution } : {}),
       ...(status.hits !== undefined ? { hits: status.hits } : {}),
       ...(status.hitsBySpec ? { hitsBySpec: status.hitsBySpec } : {}),
     };
@@ -337,6 +406,7 @@ function runPipelineCore(
         failure.exitCode,
         `${failure.message}（写盘之前被拦下，工作区零改动。分类：${failure.failureClass}）`,
         failure.failureClass,
+        failure.attribution ? { attribution: failure.attribution } : undefined,
       );
     }
     setPhase('finish');
@@ -355,7 +425,7 @@ function runPipelineCore(
         EXIT_ROLLBACK_FAILED,
         `回滚未完全成功：${detail}。工作区未完全还原，请人工介入。快照：${snapshot.dir}`,
         'rollback-failed',
-        { snapshotPath: snapshot.dir },
+        { snapshotPath: snapshot.dir, ...(failure.attribution ? { attribution: failure.attribution } : {}) },
       );
     }
     const green = deps.exec(commands.test, { timeoutMs: 10 * 60 * 1000 });
@@ -366,7 +436,7 @@ function runPipelineCore(
         `文件已还原（${restored.length} 个），但 pnpm -C packages/shared test 未回到全绿——`
         + `工作区未证明恢复，请人工介入。快照：${snapshot.dir}`,
         'rollback-failed',
-        { snapshotPath: snapshot.dir },
+        { snapshotPath: snapshot.dir, ...(failure.attribution ? { attribution: failure.attribution } : {}) },
       );
     }
     evidence.push(`回滚：还原 ${restored.length} 个文件，md5 与快照一致，packages/shared test 全绿。`);
@@ -375,7 +445,7 @@ function runPipelineCore(
       failure.exitCode,
       `${failure.message} → 已自动回滚并验证回到全绿（分类：${failure.failureClass}）。`,
       failure.failureClass,
-      { snapshotPath: snapshot.dir },
+      { snapshotPath: snapshot.dir, ...(failure.attribution ? { attribution: failure.attribution } : {}) },
     );
   };
 
@@ -459,6 +529,7 @@ function runPipelineCore(
           `批量干跑拒绝写入（工作区零改动，整批回滚）：\n  - ${detail}\n  命中样例：\n    ${samples}`,
           EXIT_ROLLED_BACK,
           false,
+          attributeBatchDryRun(specs, result),
         );
       }
     } else {
@@ -487,6 +558,7 @@ function runPipelineCore(
           + `未命中样例：${result.samples.misses.join(', ') || '（无）'}`,
           EXIT_ROLLED_BACK,
           false,
+          attributeSingleDryRun(spec, result.violations),
         );
       }
     }
@@ -529,6 +601,7 @@ function runPipelineCore(
         `写盘后 tsc --noEmit 失败：\n${tail(typecheck.stdout + typecheck.stderr, 40)}`,
         EXIT_ROLLED_BACK,
         true,
+        attributeTypecheck(specs, typecheck.stdout + typecheck.stderr),
       );
     }
 
@@ -548,7 +621,10 @@ function runPipelineCore(
           + '按设计**不自动回滚**：现场已保留供你复核，请先判断是不是要重新校准分位表，而不是当没发生。\n'
           + tail(output, 30),
           failureClass,
-          snapshot ? { snapshotPath: snapshot.dir } : undefined,
+          {
+            ...(snapshot ? { snapshotPath: snapshot.dir } : {}),
+            attribution: attributeEnumerate(specs, output, failureClass),
+          },
         );
       }
       throw new PhaseFailure(
@@ -556,6 +632,7 @@ function runPipelineCore(
         `enumerate 失败（分类 ${failureClass}）：\n${tail(output, 30)}`,
         EXIT_ROLLED_BACK,
         true,
+        attributeEnumerate(specs, output, failureClass),
       );
     }
     evidence.push('enumerate 成功。');
@@ -626,6 +703,7 @@ function runPipelineCore(
           + (isBatch ? `批量是**一个事务**：整批 ${specs.length} 条一起回滚。` : ''),
           EXIT_ROLLED_BACK,
           true,
+          { kind: 'spec', specId: item.id, reason: `新徽章 "${item.id}" 被 100% 取代（永远拿不到分）` },
         );
       }
     }
@@ -673,11 +751,19 @@ function runPipelineCore(
   } catch (err) {
     if (err instanceof PhaseFailure) {
       if (err.needsRollback || wrote) return rollback(err);
-      return finish('refused', err.exitCode, `${err.message}（工作区零改动）`, err.failureClass);
+      return finish(
+        'refused',
+        err.exitCode,
+        `${err.message}（工作区零改动）`,
+        err.failureClass,
+        err.attribution ? { attribution: err.attribution } : undefined,
+      );
     }
     const message = err instanceof SpecError ? err.message : err instanceof Error ? err.message : String(err);
     const failure = new PhaseFailure('internal', `流水线内部错误：${message}`, EXIT_ROLLED_BACK, wrote);
-    return wrote ? rollback(failure) : finish('refused', failure.exitCode, `${failure.message}（工作区零改动）`, failure.failureClass);
+    return wrote
+      ? rollback(failure)
+      : finish('refused', failure.exitCode, `${failure.message}（工作区零改动）`, failure.failureClass);
   }
 }
 

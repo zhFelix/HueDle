@@ -11,12 +11,16 @@
  * 进度只是轮询 `status.json`。浏览器关掉，管道照跑。
  */
 import type { StatusView } from '../addbadge/state';
+import type { TreeBatch } from '../addbadge/tree';
 import { FAMILIES } from '../addbadge/spec';
 import { UI_CSS } from './render';
+import { renderBatchTree } from './batch-tree';
 import { escapeHtml } from '../render/html';
 
 export interface BadgePageOptions {
   view: StatusView;
+  /** 树形列表模型（待运行批次 + 历史批次 + 归因）。 */
+  tree: TreeBatch[];
   /** 表单提交后回显的消息（成功或拒绝原因）。 */
   message?: string | undefined;
   /** 消息是否为错误。 */
@@ -52,6 +56,23 @@ const BADGE_PAGE_JS = `(function () {
   var body = document.getElementById('status-body');
   var bar = document.getElementById('status-bar');
   if (!body || !bar) return;
+  var tree = document.getElementById('batch-tree');
+  var sawRunning = false;
+  // 待运行批次的左边图标随秒数更新 hover 文案；跑完后重载页面，
+  // 让服务端渲染最终图标（绿勾 / 红叉）与条目上的归因 ✕。
+  function updateTree(s) {
+    if (!tree || !s) return;
+    if (s.state === 'running') {
+      sawRunning = true;
+      var el = tree.querySelector('[data-run-id="' + s.runId + '"]');
+      if (el) {
+        var secs = Math.max(0, Math.floor((Date.now() - Date.parse(s.startedAt)) / 1000));
+        el.setAttribute('title', '正在运行 · 已跑 ' + secs + ' 秒');
+      }
+    } else if (sawRunning) {
+      location.reload();
+    }
+  }
   function render(d) {
     var s = d.status;
     if (!s) { body.textContent = '还没有提交过加徽章作业。'; return; }
@@ -68,6 +89,7 @@ const BADGE_PAGE_JS = `(function () {
     lines.push('日志       : ' + s.logPath);
     if (s.conclusion) lines.push('结论       : ' + s.conclusion);
     body.textContent = lines.join('\\n');
+    updateTree(s);
     if (d.interrupted) {
       bar.textContent = '⚠ ' + (d.interruption || '检出未跑完的管道');
     } else if (s.state === 'running') {
@@ -91,7 +113,7 @@ const BADGE_PAGE_JS = `(function () {
 
 /** 加徽章页：服务端渲染初值 + 极少量内联 JS 轮询。 */
 export function renderBadgePage(options: BadgePageOptions): string {
-  const { view } = options;
+  const { view, tree } = options;
   const message = options.message
     ? `<p class="${options.messageIsError ? 'warning' : 'meta'}">${escapeHtml(options.message)}</p>`
     : '';
@@ -103,6 +125,7 @@ export function renderBadgePage(options: BadgePageOptions): string {
       ? `<p class="note">当前锁：${escapeHtml(view.lock.lock.runId)}（pid ${view.lock.lock.pid}）——新的提交会被<strong>拒绝</strong>，不排队。</p>`
       : '';
   const familyOptions = FAMILIES.map(family => `<option value="${escapeHtml(family)}">${escapeHtml(family)}</option>`).join('');
+  const hasPending = tree.some(batch => batch.pending);
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -123,6 +146,33 @@ export function renderBadgePage(options: BadgePageOptions): string {
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 .9rem; }
   pre.status { background: var(--ink-950); border: 1px solid var(--ink-700); border-radius: .75rem; padding: .7rem .8rem; font-family: var(--font-mono); font-size: .78rem; white-space: pre-wrap; word-break: break-all; color: var(--neutral-200); margin: .5rem 0; }
   .mode-note { color: var(--neutral-500); font-size: .75rem; }
+  form.badge button.save { background: var(--ink-800); color: var(--amber-300); border: 1px solid var(--amber-400); margin-right: .5rem; }
+  /* ── 树形批次列表：状态只在批次左边；条目上唯一的例外是失败归因的 ✕ ── */
+  .batch { border: 1px solid var(--ink-700); border-radius: .75rem; background: var(--ink-900); margin: .5rem 0; }
+  .batch > summary { display: flex; align-items: center; gap: .55rem; padding: .5rem .75rem; cursor: pointer; list-style: none; }
+  .batch > summary::-webkit-details-marker { display: none; }
+  .batch-status { display: inline-flex; align-items: center; justify-content: center; width: 1.45rem; height: 1.45rem; border-radius: 9999px; font-weight: 700; flex: 0 0 auto; font-size: .9rem; }
+  .batch-status.batch-pending { border: 2px dashed var(--neutral-500); color: var(--neutral-400); }
+  .batch-status.batch-running { border: 2px solid var(--amber-400); color: var(--amber-300); }
+  .batch-status.batch-succeeded { background: var(--emerald-400); color: #fff; }
+  .batch-status.batch-failed { background: var(--red-300); color: #fff; }
+  .batch-spinner { display: inline-block; animation: batch-spin 1.1s linear infinite; }
+  @keyframes batch-spin { to { transform: rotate(360deg); } }
+  .batch-title { font-family: var(--font-mono); font-size: .85rem; color: var(--neutral-100); }
+  .batch-count { color: var(--neutral-500); font-size: .72rem; margin-left: auto; }
+  .batch-items { list-style: none; margin: 0; padding: .2rem .75rem .6rem 2.4rem; }
+  .batch-item { display: flex; align-items: baseline; gap: .6rem; padding: .15rem 0; font-size: .82rem; }
+  .item-id { font-family: var(--font-mono); color: var(--neutral-200); }
+  .item-name { color: var(--neutral-400); }
+  .item-family { color: var(--neutral-500); font-size: .75rem; }
+  .item-fail { color: var(--red-300); font-weight: 700; }
+  .draft-del { margin-left: auto; }
+  .draft-del button { background: transparent; border: 0; color: var(--neutral-500); cursor: pointer; font-size: .75rem; }
+  .draft-del button:hover { color: var(--red-300); }
+  .run-bar { margin-top: .6rem; }
+  .run-bar button { background: var(--amber-400); color: var(--ink-950); border: 0; border-radius: 9999px; padding: .4rem 1.2rem; font-weight: 700; cursor: pointer; }
+  .run-bar button:disabled { background: var(--ink-800); color: var(--neutral-500); cursor: not-allowed; }
+  .run-bar .mode-note { margin: .4rem 0 0; }
 </style>
 </head>
 <body>
@@ -169,10 +219,25 @@ ${lockNote}
   <label for="evalHelpers">evalHelpers（手写路径用；JSON：{ "onRanks": "color =&gt; { … }" }，**只用于写盘前干跑**，不会写进仓库）</label>
   <textarea id="evalHelpers" name="evalHelpers"></textarea>
   <label><input type="checkbox" name="force" value="1"> force：检出未跑完的管道时强制接管锁（默认拒绝并报告）</label>
+  <button type="submit" class="save" formaction="/badge/save">只保存到暂存区（零计算、不碰徽章源码）</button>
   <button type="submit">提交（管道在子进程里跑，约 10–15 分钟）</button>
 </form>
-<p class="mode-note">提交只做三件事：校验 spec → 抢锁（已有管道在跑就拒绝，不排队）→ 拉起子进程。
-写盘前的 2²⁴ 干跑会拦下 hits=0 / 恒真 / 与既有徽章必然蕴含。</p>
+<p class="mode-note">「只保存」只做一件事：把这条 spec 原子写进本机暂存区文件——不校验、不干跑、不抢锁、不拉子进程。
+攒够之后在下面点「统一跑」，那时才走批量管道（一个事务，全有或全无）。</p>
+</section>
+
+<section class="card" id="batches">
+<h2>批次 / 暂存区</h2>
+<p class="question">批次 = 一次「统一跑」的单位。左边是状态：空圈=待运行、转圈=正在运行、绿底白勾=成功、红底白叉=失败；
+失败能归因到某一条时，只在那一条上加 ✕（hover 显示它自己的原因）。</p>
+<div id="batch-tree">
+${renderBatchTree(tree, { token: options.token })}
+</div>
+<form class="run-bar" method="post" action="/badge/run">
+  <input type="hidden" name="token" value="${escapeHtml(options.token ?? '')}">
+  <button type="submit"${hasPending ? '' : ' disabled'}>统一跑（走现有批量管道）</button>
+  <p class="mode-note">${hasPending ? '把上面暂存区里的全部草稿作为一个事务提交：锁 + detached 子进程 + 全有或全无，枚举只跑一次。' : '暂存区为空：先加一条草稿再统一跑。'}</p>
+</form>
 </section>
 <script>${BADGE_PAGE_JS}</script>
 </body>

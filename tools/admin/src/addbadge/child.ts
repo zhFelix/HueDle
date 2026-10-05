@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EXIT_ROLLED_BACK, runBatchPipeline, runPipeline, shellExec, type PipelineDeps } from './pipeline';
+import { recordBatchOutcome } from './history';
 import { parseBadgeSpec } from './spec';
 import {
   addBadgePaths,
@@ -80,6 +81,16 @@ export function runChild(jobPath: string, adminRoot: string, root: string): numb
     } catch {
       // 连状态都写不了：只能靠 stderr + 下次启动的 stale 锁检测。
     }
+    try {
+      recordBatchOutcome(adminRoot, job.runId, {
+        state: 'refused',
+        finishedAt: new Date().toISOString(),
+        failureClass: 'spec-reparse',
+        conclusion: `作业文件里的 spec 无法解析：${message}（工作区零改动）`,
+      });
+    } catch {
+      // 历史回填失败不影响退出码。
+    }
     return EXIT_ROLLED_BACK;
   }
 
@@ -121,6 +132,15 @@ export function runChild(jobPath: string, adminRoot: string, root: string): numb
     const outcome = isBatch
       ? runBatchPipeline({ runId: job.runId, specs, logPath: job.logPath }, deps)
       : runPipeline({ runId: job.runId, spec: specs[0]!, logPath: job.logPath }, deps);
+    // 回填批次历史（只有 UI 的统一跑写过记录；CLI 提交时这里是 no-op）。
+    // 树形列表靠它显示历史批次的最终状态与「哪一条失败」。
+    recordBatchOutcome(adminRoot, job.runId, {
+      state: outcome.state,
+      finishedAt: new Date().toISOString(),
+      ...(outcome.failureClass ? { failureClass: outcome.failureClass } : {}),
+      conclusion: outcome.conclusion,
+      ...(outcome.failureAttribution ? { failureAttribution: outcome.failureAttribution } : {}),
+    });
     console.log(`[addbadge] 结束：exitCode=${outcome.exitCode} state=${outcome.state}`);
     console.log(`[addbadge] ${outcome.conclusion}`);
     return outcome.exitCode;
@@ -145,6 +165,16 @@ export function runChild(jobPath: string, adminRoot: string, root: string): numb
       });
     } catch {
       // 状态文件也写不进去：只能靠 stderr + 下一次启动的 stale 锁检测。
+    }
+    try {
+      recordBatchOutcome(adminRoot, job.runId, {
+        state: 'refused',
+        finishedAt: new Date().toISOString(),
+        failureClass: 'internal',
+        conclusion: `子进程内部错误：${message}`,
+      });
+    } catch {
+      // 历史回填失败不影响退出码。
     }
     console.error(`[addbadge] 子进程内部错误：${message}`);
     return EXIT_ROLLED_BACK;

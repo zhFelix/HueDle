@@ -52,6 +52,25 @@ export interface StatusSpec {
   group: string | null;
 }
 
+/**
+ * 失败归因：这次失败能不能**指名到某一条 spec**？
+ *
+ * 树形列表第 ⑦ 条（「失败时只在那一条加 ✕」）依赖它。归因来源见
+ * `pipeline.ts` 的 `attributeBatchDryRun` / `attributeTypecheck` / `attributeEnumerate`：
+ *   - `spec`：明确只有一条嫌疑（批量干跑里唯一自带 violations 的那条、tsc 只点名
+ *     一个家族文件、enumerate 输出里只出现一个新 id、supersession 点名的 id）；
+ *   - `batch`：整批共同引起（**分位平衡类失败的定义**）、或嫌疑超过一条（多条的
+ *     干跑 violations、新 vs 新蕴含、tsc 点名多个家族）——此时条目上什么都不加；
+ *   - `none`：写盘之前的前置拒绝（脏工作区等），谈不上某条 spec。
+ */
+export interface FailureAttribution {
+  kind: 'spec' | 'batch' | 'none';
+  /** `kind === 'spec'` 时的徽章 id。 */
+  specId?: string;
+  /** 面向人的原因（条目 ✕ 的 title / 批次失败原因）。 */
+  reason: string;
+}
+
 /** `status.json` 的结构。UI 靠**轮询**它来显示进度（不用 SSE/WebSocket）。 */
 export interface PipelineStatus {
   version: 1;
@@ -67,6 +86,11 @@ export interface PipelineStatus {
   exitCode?: number;
   /** 失败分类（见 docs/ADMIN.md §3.4 的 12 个分支）。 */
   failureClass?: string;
+  /**
+   * 失败归因：能不能指名到某一条 spec（树形列表的条目 ✕ 只认 `kind === 'spec'`）。
+   * 成功时不存在。
+   */
+  failureAttribution?: FailureAttribution;
   /** 面向人的结论（成功 / 已回滚 / 需人工处理）。 */
   conclusion: string;
   /** 单条时是它自己；批量时是整批摘要（`batch-N`）。 */

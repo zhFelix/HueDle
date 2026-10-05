@@ -25,6 +25,16 @@ import type { StatsReport } from '../report';
 import { MAX_WINDOW_DAYS, MIN_WINDOW_DAYS } from '../window';
 import { SpecError, parseBadgeSpec, type BadgeSpec } from '../addbadge/spec';
 import { makeRunId, submitBadgeJob, type SubmitResult } from '../addbadge/submit';
+import {
+  addDraft,
+  draftFieldsFromForm,
+  removeDraft,
+  runStagedBatch,
+  type DraftFields,
+  type RunStagedOptions,
+  type StagedDraft,
+} from '../addbadge/staging';
+import { buildBatchTree, type TreeBatch } from '../addbadge/tree';
 import { addBadgePaths, readStatus, type StatusView } from '../addbadge/state';
 import { renderBadgePage, renderBadgeStatusJson } from './badge';
 import { renderUiError, renderUiPage } from './render';
@@ -84,6 +94,19 @@ export interface UiBadgeOptions {
   submit?: (spec: BadgeSpec, options: { force: boolean }) => SubmitResult;
   /** 状态读取；默认 {@link readStatus}。 */
   readStatus?: (adminRoot: string) => StatusView;
+  /**
+   * 暂存区写操作（只保存，零计算）。默认 {@link addDraft} / {@link removeDraft}。
+   * 测试可注入以断言「保存不触发任何计算」。
+   */
+  stageDraft?: (adminRoot: string, fields: DraftFields) => StagedDraft;
+  deleteDraft?: (adminRoot: string, draftId: string) => boolean;
+  /**
+   * 统一跑：默认 {@link runStagedBatch}（走**现有**批量管道 `submitBadgeBatchJob`）。
+   * 测试可注入以断言 HTTP 层只负责转发。
+   */
+  runStaged?: (options: RunStagedOptions) => SubmitResult;
+  /** 树形列表模型；默认 {@link buildBatchTree}。 */
+  readTree?: (adminRoot: string) => TreeBatch[];
   /**
    * 表单令牌；不传就每次启动随机生成。
    *
@@ -234,13 +257,17 @@ export function specFromForm(fields: URLSearchParams): { raw: unknown; spec: Bad
   return { raw, spec: parseBadgeSpec(raw) };
 }
 
-/** `POST /badge/submit`：校验 → 提交（抢锁 + 拉起 detached 子进程）→ 303 回表单页。 */
-async function handleBadgeSubmit(
-  badge: UiBadgeOptions,
+/**
+ * 所有写端点的公共前置：同源 → content-type → 体积上限 → 表单令牌。
+ *
+ * 返回 `null` 表示已经发过错误响应（调用方直接 return）。这四道检查与
+ * `POST /badge/submit` 完全一致：新增的保存/删除/统一跑没有放宽任何一道。
+ */
+async function readAuthorizedForm(
   token: string,
   req: IncomingMessage,
   res: ServerResponse,
-): Promise<void> {
+): Promise<URLSearchParams | null> {
   if (!isSameOrigin(req)) {
     // 把观察到的东西写进页面：被拒的人需要知道**为什么**（否则只会以为是坏了）。
     const observed = `Host=${JSON.stringify(req.headers.host ?? '')} Origin=${JSON.stringify(req.headers.origin ?? '')}`;
@@ -251,19 +278,18 @@ async function handleBadgeSubmit(
       {},
       false,
     );
-    return;
+    return null;
   }
   const contentType = req.headers['content-type'] ?? '';
   if (!contentType.startsWith('application/x-www-form-urlencoded')) {
     send(res, 400, renderUiError(400, '只接受 application/x-www-form-urlencoded 表单。'), {}, false);
-    return;
+    return null;
   }
   const body = await readFormBody(req);
   if (body === null) {
     send(res, 413, renderUiError(413, '表单体过大。'), {}, false);
-    return;
+    return null;
   }
-
   const fields = new URLSearchParams(body);
   // 令牌优先：跨站页面读不到本页，因此拿不到这个值。
   if (!tokenMatches(token, fields.get('token'))) {
@@ -274,8 +300,21 @@ async function handleBadgeSubmit(
       {},
       false,
     );
-    return;
+    return null;
   }
+  return fields;
+}
+
+/** `POST /badge/submit`：校验 → 提交（抢锁 + 拉起 detached 子进程）→ 303 回表单页。 */
+async function handleBadgeSubmit(
+  badge: UiBadgeOptions,
+  token: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const fields = await readAuthorizedForm(token, req, res);
+  if (!fields) return;
+
   const force = fields.get('force') === '1';
   let built: { raw: unknown; spec: BadgeSpec };
   try {
@@ -316,6 +355,70 @@ async function handleBadgeSubmit(
   redirect(res, `/badge?submitted=${encodeURIComponent(result.runId)}`);
 }
 
+/**
+ * `POST /badge/save`：**只保存**到暂存区。
+ *
+ * 零计算：不解析 `when`/`evalHelpers`、不校验 spec、不抢锁、不拉子进程、不跑干跑。
+ * 因此它瞬间返回；合法性问题推迟到点「统一跑」时才反馈（用户明确接受）。
+ */
+async function handleBadgeSave(
+  badge: UiBadgeOptions,
+  token: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const fields = await readAuthorizedForm(token, req, res);
+  if (!fields) return;
+  try {
+    const stage = badge.stageDraft ?? addDraft;
+    const draft = stage(badge.adminRoot, draftFieldsFromForm(fields));
+    redirect(res, `/badge?saved=${encodeURIComponent(draft.fields.id || draft.draftId)}`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    redirect(res, `/badge?error=${encodeURIComponent(`保存失败：${message}`)}`);
+  }
+}
+
+/** `POST /badge/draft/delete`：从暂存区删一条草稿（外部世界零改动）。 */
+async function handleBadgeDelete(
+  badge: UiBadgeOptions,
+  token: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const fields = await readAuthorizedForm(token, req, res);
+  if (!fields) return;
+  const draftId = fields.get('draftId') ?? '';
+  const remove = badge.deleteDraft ?? removeDraft;
+  const removed = remove(badge.adminRoot, draftId);
+  redirect(res, removed ? '/badge?deleted=1' : `/badge?error=${encodeURIComponent('要删除的草稿不存在')}`);
+}
+
+/** `POST /badge/run`：把暂存区的全部草稿交给现有批量管道统一跑。 */
+async function handleBadgeRun(
+  badge: UiBadgeOptions,
+  token: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const fields = await readAuthorizedForm(token, req, res);
+  if (!fields) return;
+  const run = badge.runStaged ?? runStagedBatch;
+  let result: SubmitResult;
+  try {
+    result = run({ adminRoot: badge.adminRoot, root: badge.root });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    redirect(res, `/badge?error=${encodeURIComponent(`统一跑失败：${message}`)}`);
+    return;
+  }
+  if (!result.ok) {
+    redirect(res, `/badge?error=${encodeURIComponent(result.reason)}`);
+    return;
+  }
+  redirect(res, `/badge?submitted=${encodeURIComponent(result.runId)}`);
+}
+
 /** 303：POST 之后回到表单页（PRG，避免刷新重复提交）。 */
 function redirect(res: ServerResponse, location: string): void {
   res.writeHead(303, {
@@ -340,9 +443,23 @@ async function handleRequest(
   // ④ 只读统计的路由根本不接受写方法；**唯一**的例外是加徽章提交，
   //    而且它只做「抢锁 + 拉起 detached 子进程」，不在请求里跑管道。
   if (method !== 'GET' && method !== 'HEAD') {
-    if (method === 'POST' && url.pathname === '/badge/submit' && options.badge) {
-      await handleBadgeSubmit(options.badge, token, req, res);
-      return;
+    if (method === 'POST' && options.badge) {
+      if (url.pathname === '/badge/submit') {
+        await handleBadgeSubmit(options.badge, token, req, res);
+        return;
+      }
+      if (url.pathname === '/badge/save') {
+        await handleBadgeSave(options.badge, token, req, res);
+        return;
+      }
+      if (url.pathname === '/badge/draft/delete') {
+        await handleBadgeDelete(options.badge, token, req, res);
+        return;
+      }
+      if (url.pathname === '/badge/run') {
+        await handleBadgeRun(options.badge, token, req, res);
+        return;
+      }
     }
     send(
       res,
@@ -368,13 +485,30 @@ async function handleRequest(
   }
   if (options.badge && url.pathname === '/badge') {
     const view = (options.badge.readStatus ?? readStatus)(options.badge.adminRoot);
+    const tree = (options.badge.readTree ?? buildBatchTree)(options.badge.adminRoot);
     const error = url.searchParams.get('error');
     const submitted = url.searchParams.get('submitted');
-    const message = error ? `提交被拒绝：${error}` : submitted ? `已提交：${submitted}。管道在子进程里跑。` : undefined;
+    const saved = url.searchParams.get('saved');
+    const deleted = url.searchParams.get('deleted');
+    const message = error
+      ? `提交被拒绝：${error}`
+      : submitted
+        ? `已提交：${submitted}。管道在子进程里跑。`
+        : saved
+          ? `已保存到暂存区：${saved}（未跑任何东西）。`
+          : deleted
+            ? '已从暂存区删除。'
+            : undefined;
     send(
       res,
       200,
-      renderBadgePage({ view, message, messageIsError: Boolean(error), token }),
+      renderBadgePage({
+        view,
+        tree,
+        message,
+        messageIsError: Boolean(error),
+        token,
+      }),
       {},
       method === 'HEAD',
       // 见 send() 的说明：no-referrer 会让同源表单 POST 的 Origin 变成 `null`。
