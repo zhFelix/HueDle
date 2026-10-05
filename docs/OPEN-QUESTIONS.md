@@ -58,9 +58,26 @@ docs/research/PRICING-CURRENT.md   写着「徽章条数：129」（实际 128�
 即**孤儿定价条目**——生成物里有一条永远不会有对应徽章的记录。
 
 **而当时所有测试都是绿的**（shared 177 / web 348 / admin 427）。
+
 **没有任何断言覆盖「定价表里的 id 是否都有对应的徽章定义」。**
 
-它是被我人工发现的，不是被测试发现的。**只差一步就被 `git add -A` 提交进历史。**
+**注意别把这句读成"没人看 PRICING"。**恰恰相反——`PRICING` 被遍历了 **4 处**
+（都在 `packages/shared/src/badges/__tests__/registry.test.ts`）：
+
+| 位置 | 检查什么 |
+|---|---|
+| `:68` | `ep` 是否精确等于 `epFromHits(hits)`（禁止取整漂移） |
+| `:78` | 有没有 `hits <= 0` 的死徽章 |
+| `:84` | 同 `hits` 是否同 `ep` |
+| `:93` | 单调性：`hits` 越少 `ep` 越大 |
+
+**它们全都在看定价的【数值】，没有一处比较 id 集合。**
+
+而 `registry.test.ts:57` 那条是 **def → pricing** 方向（`for (const badge of allBadges) { PRICING[badge.id] … }`），
+即 `compose` 同一个方向——**定义驱动，孤儿条目永远不会被查到**。
+
+所以 `'extreme-404': { hits: 1, … }` 逐条过：`ep` 一致 ✅、`hits > 0` ✅、同 `hits` 同 `ep` ✅、单调 ✅
+——**四项全过**。它是被我人工发现的，不是被测试发现的。**只差一步就被 `git add -A` 提交进历史。**
 
 ### 【我的判断】该加
 
