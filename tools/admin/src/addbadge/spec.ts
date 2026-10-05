@@ -9,8 +9,9 @@
  *      它同时能编译出「源码」与「可执行谓词」，因此**能在写盘之前**跑 2²⁴ 全色域干跑。
  *   2. **手写路径**（一等公民，不是逃生舱）：`handwritten.check` 是一段单表达式，
  *      可以引用目标家族文件里**已经存在**的 private helper。写盘前同样干跑——
- *      引用到的 private helper 必须由作者用 `handwritten.evalHelpers` 提供一份
- *      **仅用于干跑求值**的 JS 版本（见 `build.ts` 的说明与报告里的「不确定项」）。
+ *      干跑**直接 import 目标家族文件里的真品**（`await import()`，工具本身跑在 `tsx` 下），
+ *      所以 `handwritten.evalHelpers` 只是**依赖名字列表**，不再接受实现源码副本。
+ *      这样「干跑求值的东西」与「写进仓库的东西」必然是同一份实现（见 `build.ts`）。
  *
  * 这里只做**结构**校验；「合不合法」的语义校验（id 全局唯一、name 同家族不重名……）
  * 由 `families.ts` 读真实文件后完成。
@@ -251,7 +252,7 @@ export interface StructuredSpec {
   when: Expr;
 }
 
-/** 手写 spec（单表达式 + 仅用于干跑求值的 private helper 副本）。 */
+/** 手写 spec（单表达式 + 干跑要 import 的 private helper **名字列表**）。 */
 export interface HandwrittenSpec {
   id: string;
   name: string;
@@ -262,10 +263,12 @@ export interface HandwrittenSpec {
     /** 单表达式（可含嵌套箭头函数），插入成 `check: c => <check>,`。 */
     check: string;
     /**
-     * **只用于干跑求值**的私有 helper 源码（不会写进仓库）。
-     * 键必须在目标家族文件里已经存在同名声明，否则拒绝（tsc 会拦，但我们更早拦）。
+     * 干跑需要从目标家族文件 import 的 private helper **名字**（不是实现）。
+     *
+     * 每个名字都必须在目标家族文件里有顶层 `const <name> = …` 声明，并且**带 `export`**，
+     * 否则干跑直接报错中止（不退回任何作者提供的副本）。
      */
-    evalHelpers?: Record<string, string>;
+    evalHelpers?: string[];
   };
 }
 
@@ -345,24 +348,30 @@ export function parseBadgeSpec(input: unknown, path = 'spec'): BadgeSpec {
     throw new SpecError('handwritten.check 必须是非空字符串（单表达式）', `${path}.handwritten.check`);
   }
   const evalHelpersRaw = (block as Record<string, unknown>).evalHelpers;
-  let evalHelpers: Record<string, string> | undefined;
+  let evalHelpers: string[] | undefined;
   if (evalHelpersRaw !== undefined && evalHelpersRaw !== null) {
-    if (typeof evalHelpersRaw !== 'object' || Array.isArray(evalHelpersRaw)) {
-      throw new SpecError('handwritten.evalHelpers 必须是 { 名字: 源码 } 对象', `${path}.handwritten.evalHelpers`);
+    if (!Array.isArray(evalHelpersRaw)) {
+      throw new SpecError(
+        'handwritten.evalHelpers 必须是**名字数组**（如 ["onRanks","ranksAtLeast"]）；'
+        + '干跑直接 import 目标家族文件里的真品，不再接受作者提供的实现副本。',
+        `${path}.handwritten.evalHelpers`,
+      );
     }
-    evalHelpers = {};
-    for (const [key, value] of Object.entries(evalHelpersRaw as Record<string, unknown>)) {
-      if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)) {
-        throw new SpecError(`evalHelpers 的键必须是合法标识符，收到 ${JSON.stringify(key)}`, path);
+    const names: string[] = [];
+    for (const item of evalHelpersRaw) {
+      if (typeof item !== 'string' || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(item)) {
+        throw new SpecError(
+          `evalHelpers 的每一项都必须是合法标识符，收到 ${JSON.stringify(item)}`,
+          `${path}.handwritten.evalHelpers`,
+        );
       }
-      if (typeof value !== 'string' || value.trim().length === 0) {
-        throw new SpecError(`evalHelpers.${key} 必须是非空源码字符串`, path);
+      if (names.includes(item)) {
+        throw new SpecError(`evalHelpers 里 "${item}" 重复出现`, `${path}.handwritten.evalHelpers`);
       }
-      evalHelpers[key] = value;
+      names.push(item);
     }
+    if (names.length > 0) evalHelpers = names;
   }
-  // 未使用的变量告警：evalHelpers 为空对象时归一成 undefined，行为一致。
-  if (evalHelpers && Object.keys(evalHelpers).length === 0) evalHelpers = undefined;
 
   return { ...common, handwritten: { check: check.trim(), ...(evalHelpers ? { evalHelpers } : {}) } };
 }

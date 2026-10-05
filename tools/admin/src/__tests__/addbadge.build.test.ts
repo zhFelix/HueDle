@@ -115,16 +115,19 @@ describe('spec 校验：写盘前就拒绝必然错的东西', () => {
 });
 
 describe('手写路径：白名单 + 干跑可求值', () => {
-  it('引用文件私有 helper 时必须提供 evalHelpers', () => {
+  it('引用文件私有 helper 时必须把它列入依赖名字（否则拒绝）', () => {
     expect(() => compileHandwritten('onRanks(c)')).toThrow(SpecError);
-    const fn = compileHandwritten('onRanks(c)', { onRanks: 'color => color.r === 1' });
+    // 真品由 loadFamilyHelpers import 进来后注入；这里直接给实现验语义。
+    const fn = compileHandwritten('onRanks(c)', { onRanks: (color: ColorInfo) => color.r === 1 });
     expect(fn(toColorInfo({ r: 1, g: 0, b: 0 }))).toBe(true);
     expect(fn(toColorInfo({ r: 2, g: 0, b: 0 }))).toBe(false);
   });
 
-  it('evalHelpers 之间可以互相引用', () => {
-    const fn = compileHandwritten('double(c.r) === 8', { double: 'n => n * 2' });
-    expect(fn(toColorInfo({ r: 4, g: 0, b: 0 }))).toBe(true);
+  it('注入的 helper 之间可以互相引用（真品在文件里就是这么写的）', () => {
+    const double = (n: number): number => n * 2;
+    const quadruple = (n: number): number => double(double(n));
+    const fn = compileHandwritten('quadruple(c.r) === 8', { double, quadruple });
+    expect(fn(toColorInfo({ r: 2, g: 0, b: 0 }))).toBe(true);
   });
 
   it('拒绝 process/eval/require 这类标识符', () => {

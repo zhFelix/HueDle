@@ -247,7 +247,7 @@ ${lockNote}
   <textarea id="when" name="when"></textarea>
   <label for="check">check（手写路径用；例：onRanks(c, counts =&gt; counts.filter(n =&gt; n &gt;= 5).length === 1)）</label>
   <textarea id="check" name="check"></textarea>
-  <label for="evalHelpers">evalHelpers（手写路径用；JSON：{ "onRanks": "color =&gt; { … }" }，**只用于写盘前干跑**，不会写进仓库）</label>
+  <label for="evalHelpers">evalHelpers（手写路径用；JSON **名字数组**：["onRanks","ranksAtLeast"]。干跑直接 import 目标文件里的真品，不需要实现源码）</label>
   <textarea id="evalHelpers" name="evalHelpers"></textarea>
   <label><input type="checkbox" name="force" value="1"> force：检出未跑完的管道时强制接管锁（默认拒绝并报告）</label>
   <button type="submit" class="save" formaction="/badge/save">只保存到暂存区（零计算、不碰徽章源码）</button>

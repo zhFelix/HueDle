@@ -43,7 +43,7 @@ function makeSpec(overrides: Record<string, unknown>): BadgeSpec {
 const batchJob = (specs: BadgeSpec[]): BatchPipelineJob => ({ runId: 'run-attr', specs, logPath: 'log' });
 
 describe('干跑失败：唯一自带 violations 的那条被点名', () => {
-  it('三条里只有第二条 hits=0 → 归因到第二条，不是整批', () => {
+  it('三条里只有第二条 hits=0 → 归因到第二条，不是整批', async () => {
     const ok1 = makeSpec({ id: 'gray-attr-ok-1', name: '甲条', description: 'B = 7' });
     const bad = makeSpec({
       id: 'gray-attr-bad-2',
@@ -53,7 +53,7 @@ describe('干跑失败：唯一自带 violations 的那条被点名', () => {
     });
     const ok3 = makeSpec({ id: 'gray-attr-ok-3', name: '丙条', description: 'B = 13', when: { eq: [{ field: 'b' }, 13] } });
 
-    const outcome = runBatchPipeline(batchJob([ok1, bad, ok3]), pipelineDeps(repo));
+    const outcome = await runBatchPipeline(batchJob([ok1, bad, ok3]), pipelineDeps(repo));
 
     expect(outcome.failureClass).toBe('dryrun');
     expect(outcome.failureAttribution).toBeDefined();
@@ -62,10 +62,10 @@ describe('干跑失败：唯一自带 violations 的那条被点名', () => {
     expect(outcome.failureAttribution?.reason).toContain('hits === 0');
   });
 
-  it('两条互相蕴含（只有新 vs 新）→ 点名两条，无法单选 → 整批', () => {
+  it('两条互相蕴含（只有新 vs 新）→ 点名两条，无法单选 → 整批', async () => {
     const a = makeSpec({ id: 'gray-attr-dup-a', name: '重复甲', description: 'B = 7' });
     const b = makeSpec({ id: 'gray-attr-dup-b', name: '重复乙', description: 'B = 7' });
-    const outcome = runBatchPipeline(batchJob([a, b]), pipelineDeps(repo));
+    const outcome = await runBatchPipeline(batchJob([a, b]), pipelineDeps(repo));
     expect(outcome.failureClass).toBe('dryrun');
     expect(outcome.failureAttribution?.kind).toBe('batch');
     expect(outcome.failureAttribution?.specId).toBeUndefined();
@@ -84,23 +84,23 @@ describe('tsc 失败：按被点名的家族文件归因', () => {
     };
   }
 
-  it('只有 math 家族被点名，且批量里 math 只有一条 → 归因到它', () => {
+  it('只有 math 家族被点名，且批量里 math 只有一条 → 归因到它', async () => {
     const specs = [
       makeSpec({ id: 'gray-tsc-1', name: '灰条', description: 'B = 7' }),
       makeSpec({ id: 'math-tsc-2', name: '数条', description: 'G = 11', family: 'math', when: { eq: [{ field: 'g' }, 11] } }),
     ];
-    const outcome = runBatchPipeline(batchJob(specs), pipelineDeps(repo, { exec: execTypecheckMentions('math') }));
+    const outcome = await runBatchPipeline(batchJob(specs), pipelineDeps(repo, { exec: execTypecheckMentions('math') }));
     expect(outcome.failureClass).toBe('typecheck');
     expect(outcome.failureAttribution?.kind).toBe('spec');
     expect(outcome.failureAttribution?.specId).toBe('math-tsc-2');
   });
 
-  it('同家族有两条时指认不唯一 → 整批，不误伤', () => {
+  it('同家族有两条时指认不唯一 → 整批，不误伤', async () => {
     const specs = [
       makeSpec({ id: 'gray-tsc-3', name: '灰一', description: 'B = 7' }),
       makeSpec({ id: 'gray-tsc-4', name: '灰二', description: 'B = 13', when: { eq: [{ field: 'b' }, 13] } }),
     ];
-    const outcome = runBatchPipeline(batchJob(specs), pipelineDeps(repo, { exec: execTypecheckMentions('gray') }));
+    const outcome = await runBatchPipeline(batchJob(specs), pipelineDeps(repo, { exec: execTypecheckMentions('gray') }));
     expect(outcome.failureAttribution?.kind).toBe('batch');
   });
 });
@@ -117,21 +117,21 @@ describe('enumerate 失败：全局平衡类绝不归因到单条', () => {
     };
   }
 
-  it('分位平衡类（bucketsSelfConsistent）→ kind=batch', () => {
+  it('分位平衡类（bucketsSelfConsistent）→ kind=batch', async () => {
     const specs = [makeSpec({ id: 'gray-bal-a', name: '平衡甲', description: 'B = 7' })];
-    const outcome = runBatchPipeline(batchJob(specs), pipelineDeps(repo, { exec: execEnumerate('', true) }));
+    const outcome = await runBatchPipeline(batchJob(specs), pipelineDeps(repo, { exec: execEnumerate('', true) }));
     expect(outcome.failureClass).toBe('enumerate-global-balance');
     expect(outcome.failureAttribution?.kind).toBe('batch');
     expect(outcome.failureAttribution?.reason).toContain('无法归因到单条');
   });
 
-  it('普通 enumerate 失败且输出里只有一个新 id → 归因到它', () => {
+  it('普通 enumerate 失败且输出里只有一个新 id → 归因到它', async () => {
     const specs = [
       makeSpec({ id: 'gray-enum-a', name: '枚举甲', description: 'B = 7' }),
       makeSpec({ id: 'math-enum-b', name: '枚举乙', description: 'G = 11', family: 'math', when: { eq: [{ field: 'g' }, 11] } }),
     ];
     const output = 'AssertionError: 徽章 "gray-enum-a" 缺少定价数据';
-    const outcome = runBatchPipeline(batchJob(specs), pipelineDeps(repo, { exec: execEnumerate(output, false) }));
+    const outcome = await runBatchPipeline(batchJob(specs), pipelineDeps(repo, { exec: execEnumerate(output, false) }));
     expect(outcome.failureClass).toBe('enumerate');
     expect(outcome.failureAttribution?.kind).toBe('spec');
     expect(outcome.failureAttribution?.specId).toBe('gray-enum-a');
@@ -139,12 +139,12 @@ describe('enumerate 失败：全局平衡类绝不归因到单条', () => {
 });
 
 describe('supersession：点名的 id 直接归因', () => {
-  it('批量里任意一条 100% 被取代 → 归因到那一条', () => {
+  it('批量里任意一条 100% 被取代 → 归因到那一条', async () => {
     const specs = [
       makeSpec({ id: 'gray-super-ok', name: '取代甲', description: 'B = 7' }),
       makeSpec({ id: 'gray-super-dead', name: '取代乙', description: 'B = 13', when: { eq: [{ field: 'b' }, 13] } }),
     ];
-    const outcome = runBatchPipeline(
+    const outcome = await runBatchPipeline(
       batchJob(specs),
       pipelineDeps(repo, { exec: createFakeExec(repo.root, { supersession: 'dead', deadBadgeId: 'gray-super-dead' }) }),
     );

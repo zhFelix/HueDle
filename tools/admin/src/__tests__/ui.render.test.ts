@@ -301,9 +301,12 @@ describe('详情面板：右栏只渲染选中的那一项', () => {
   it('选中某个指标时页面上只有它一张 card，其它指标的标题与问题一个字都没有', () => {
     for (const metric of METRICS) {
       const html = renderUiPage(buildFullReport(), { days: 30, metric: metric.id });
+      // **主断言**：右栏恰好一张 card（版面契约的直接表达）。
+      expect(html.match(/<section class="card"/g), `${metric.id} 应恰好一张 card`).toHaveLength(1);
       expect(html).toContain(`<section class="card" id="${metric.id}">`);
-      expect(html.match(/<section class="card"/g)).toHaveLength(1);
       expect(html).toContain(escapeHtml(metric.question));
+      // 旁证（字符串匹配）：其它指标的标题/问题不该出现。它依赖「短名 ≠ 任何完整标题」，
+      // 因此保留但不作为主断言——版面契约由上面的 `.card` 计数直接保证。
       for (const other of METRICS) {
         if (other.id === metric.id) continue;
         expect(html, `${metric.id} 页面上不该出现 ${other.id} 的标题`).not.toContain(escapeHtml(other.title));

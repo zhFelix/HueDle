@@ -25,7 +25,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import type { ColorInfo } from '@huedle/shared';
-import { compileSpec } from './compile';
+import { compileSpec, helperHashMismatches } from './compile';
 import {
   loadExistingChecks,
   runBatchDryRun,
@@ -128,6 +128,14 @@ export interface PipelineDeps {
   existingChecks?: () => ExistingCheck[];
   /** 干跑色域大小，默认 2²⁴；测试用小值。 */
   domainSize?: number;
+  /**
+   * 写盘后的 private helper 哈希自检（默认读磁盘重算）。
+   *
+   * 它是一条**内部断言**，不是给用户看的警告 + 确认：开跑时受影响路径必须干净、
+   * 工具只往文件末尾追加徽章、从不改 helper，所以运行期间 helper 不可能变化。
+   * 返回与干跑时**不一致**的名字列表。测试靠注入它来构造「不一致」。
+   */
+  verifyHelperHashes?: (family: BadgeSpec['family'], expected: Readonly<Record<string, string>>) => string[];
   commands?: PipelineCommands;
   /** 状态每次变化都会回调（子进程用它写 `status.json`）。 */
   onStatus?: (status: PipelineStatus) => void;
@@ -412,7 +420,7 @@ export function assertBatchInternalUnique(specs: readonly BadgeSpec[]): void {
 // ───────────────────────────── 主流程 ─────────────────────────────
 
 /** 单条路径（既有行为，调用方与测试都只用它）。 */
-export function runPipeline(job: PipelineJob, deps: PipelineDeps): PipelineOutcome {
+export function runPipeline(job: PipelineJob, deps: PipelineDeps): Promise<PipelineOutcome> {
   return runPipelineCore(job.runId, [job.spec], job.logPath, deps, job.acceptedSpecHash);
 }
 
@@ -423,20 +431,20 @@ export function runPipeline(job: PipelineJob, deps: PipelineDeps): PipelineOutco
  * 差别只在：干跑一次扫描整批并做新 vs 新检查、按 spec 逐条写盘、`supersession`
  * 检查**任意一条**新徽章被 100% 取代 → 整批回滚。
  */
-export function runBatchPipeline(job: BatchPipelineJob, deps: PipelineDeps): PipelineOutcome {
+export function runBatchPipeline(job: BatchPipelineJob, deps: PipelineDeps): Promise<PipelineOutcome> {
   if (job.specs.length === 0) {
     throw new SpecError('批量加徽章至少要有一条 spec', 'specs');
   }
   return runPipelineCore(job.runId, job.specs, job.logPath, deps, job.acceptedSpecHash);
 }
 
-function runPipelineCore(
+async function runPipelineCore(
   runId: string,
   specs: BadgeSpec[],
   logPath: string,
   deps: PipelineDeps,
   acceptedSpecHash?: string,
-): PipelineOutcome {
+): Promise<PipelineOutcome> {
   const commands = deps.commands ?? DEFAULT_COMMANDS;
   const isBatch = specs.length > 1;
   const spec = specs[0]!;
@@ -602,7 +610,8 @@ function runPipelineCore(
       );
     }
     assertBatchInternalUnique(specs);
-    const compiled = specs.map(item => compileSpec(item, deps.root));
+    // 手写路径在这里 `await import` 目标家族文件里的**真品** helper（工具跑在 tsx 下）。
+    const compiled = await Promise.all(specs.map(item => compileSpec(item, deps.root)));
     for (const [index, item] of specs.entries()) {
       const source = compiled[index]!.source.replace(/\n/g, ' \\n ');
       evidence.push(isBatch ? `check 源码（${item.id}）：${source}` : `check 源码：${source}`);
@@ -611,10 +620,10 @@ function runPipelineCore(
         const names = compiledItem.evalHelperNames.join(', ');
         evidence.push(
           isBatch
-            ? `注意（${item.id}）：干跑使用作者提供的 evalHelpers（${names}）求值；`
-              + '它们不写进仓库，本工具**无法证明**其与文件里 private helper 的实现逐字等价。'
-            : `注意：干跑使用作者提供的 evalHelpers（${names}）求值；`
-              + '它们不写进仓库，本工具**无法证明**其与文件里 private helper 的实现逐字等价。',
+            ? `干跑（${item.id}）：直接 import 目标家族文件里的真品 private helper（${names}）求值——`
+              + '作者不再提供任何副本，因此不存在「副本与真品漂移」。'
+            : `干跑：直接 import 目标家族文件里的真品 private helper（${names}）求值——`
+              + '作者不再提供任何副本，因此不存在「副本与真品漂移」。',
         );
       }
     }
@@ -729,6 +738,21 @@ function runPipelineCore(
       wrote = true;
       // 写盘后的三自检：对**磁盘上的字节**再验一遍。
       assertSelfCheck(target.content, readFileSync(target.path, 'utf8'), plan.block, plan.insertAt, item.id);
+      // 写盘后的**内部自检**：private helper 的哈希必须与干跑时一致。
+      // 守卫已保证运行期间 helper 不会变化，所以不一致 = 内部错误，立即中止回滚。
+      const verifyHashes = deps.verifyHelperHashes
+        ?? ((family: BadgeSpec['family'], expected: Readonly<Record<string, string>>) =>
+          helperHashMismatches(deps.root, family, expected));
+      const drifted = verifyHashes(item.family, compiled[index]!.helperHashes);
+      if (drifted.length > 0) {
+        throw new PhaseFailure(
+          'helper-drift',
+          `写盘后自检失败：private helper 的声明与干跑时不一致（${drifted.join(', ')}）——`
+          + '干跑与写盘必须用同一份实现。这是内部错误，已中止并回滚。',
+          EXIT_ROLLED_BACK,
+          true,
+        );
+      }
       evidence.push(
         `写盘：${item.family}.ts（${item.id}，缩进模板 ${JSON.stringify(indent)}，插入点 ${plan.insertAt}）`,
       );

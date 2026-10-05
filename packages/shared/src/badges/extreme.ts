@@ -11,7 +11,7 @@ import type { BadgeDef, ColorInfo } from '../types';
 import { channelSum, maxChannel, minChannel } from './helpers';
 
 // private：三通道中恰为 255 的通道个数，仅本文件内部使用
-const fullChannelCount = (c: ColorInfo): number =>
+export const fullChannelCount = (c: ColorInfo): number =>
   (c.r === 255 ? 1 : 0) + (c.g === 255 ? 1 : 0) + (c.b === 255 ? 1 : 0);
 
 export const extremeBadges: BadgeDef[] = [

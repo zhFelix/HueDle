@@ -21,7 +21,7 @@ const RANK_SPACE = 16;
  * 契约保证 `hex` 为大写、带 `#`、恒 7 字符；非法输入返回 `null`（不抛异常）。
  */
 // private
-const parseRanks = (color: ColorInfo): number[] | null => {
+export const parseRanks = (color: ColorInfo): number[] | null => {
   const chars = color.hex.slice(1).toUpperCase();
   if (chars.length !== 6) return null;
   const ranks: number[] = [];
@@ -35,7 +35,7 @@ const parseRanks = (color: ColorInfo): number[] | null => {
 
 /** 各点数出现次数（长度 16 的计数表）；非法 hex 返回 `null`。 */
 // private
-const rankCounts = (color: ColorInfo): number[] | null => {
+export const rankCounts = (color: ColorInfo): number[] | null => {
   const ranks = parseRanks(color);
   if (ranks === null) return null;
   const counts: number[] = new Array<number>(RANK_SPACE).fill(0);
@@ -45,14 +45,14 @@ const rankCounts = (color: ColorInfo): number[] | null => {
 
 /** 以点数为参数的判定包装：非法 hex 一律不命中。 */
 // private
-const onRanks = (color: ColorInfo, test: (counts: number[]) => boolean): boolean => {
+export const onRanks = (color: ColorInfo, test: (counts: number[]) => boolean): boolean => {
   const counts = rankCounts(color);
   return counts !== null && test(counts);
 };
 
 /** 出现次数 ≥ n 的点数种类数。 */
 // private
-const ranksAtLeast = (counts: number[], n: number): number => {
+export const ranksAtLeast = (counts: number[], n: number): number => {
   let found = 0;
   for (let i = 0; i < counts.length; i += 1) if (counts[i] >= n) found += 1;
   return found;
@@ -60,7 +60,7 @@ const ranksAtLeast = (counts: number[], n: number): number => {
 
 /** 从 `start` 起连续 `length` 个点数是否全部至少出现一次。 */
 // private
-const hasRankRunAt = (counts: number[], start: number, length: number): boolean => {
+export const hasRankRunAt = (counts: number[], start: number, length: number): boolean => {
   if (start < 0 || start + length > RANK_SPACE) return false;
   for (let offset = 0; offset < length; offset += 1) {
     if (counts[start + offset] === 0) return false;
@@ -70,7 +70,7 @@ const hasRankRunAt = (counts: number[], start: number, length: number): boolean 
 
 /** 是否存在 `length` 个**连续点数额**（start…start+length−1）全部至少出现一次。 */
 // private
-const hasRankRun = (counts: number[], length: number): boolean => {
+export const hasRankRun = (counts: number[], length: number): boolean => {
   for (let start = 0; start + length <= RANK_SPACE; start += 1) {
     if (hasRankRunAt(counts, start, length)) return true;
   }
@@ -79,7 +79,7 @@ const hasRankRun = (counts: number[], length: number): boolean => {
 
 /** 落在「低半花色」0–7 的点数个数。 */
 // private
-const lowSuitCount = (counts: number[]): number => {
+export const lowSuitCount = (counts: number[]): number => {
   let low = 0;
   for (let i = 0; i < 8; i += 1) low += counts[i];
   return low;

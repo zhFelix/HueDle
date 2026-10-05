@@ -44,7 +44,7 @@ function fakeSpawn(
 }
 
 describe('测试 4：锁 —— 并发提交被拒绝，不是排队', () => {
-  it('第二次提交返回 EXIT_LOCKED，且只拉起过一个子进程', () => {
+  it('第二次提交返回 EXIT_LOCKED，且只拉起过一个子进程', async () => {
     const record: Array<{ command: string; args: string[] }> = [];
     const base = { rawSpec: rawSpec(), spec: spec(), root: repo.root, adminRoot: repo.adminRoot, logPath: join(repo.adminRoot, 'out/addbadge/logs/x.log') };
 
@@ -63,7 +63,7 @@ describe('测试 4：锁 —— 并发提交被拒绝，不是排队', () => {
     expect(readdirSync(addBadgePaths(repo.adminRoot).jobsDir)).toEqual(['run-1.json']);
   });
 
-  it('作业文件里存的是**原始 JSON**（子进程能重新 parse 它，而不是 AST）', () => {
+  it('作业文件里存的是**原始 JSON**（子进程能重新 parse 它，而不是 AST）', async () => {
     const record: Array<{ command: string; args: string[] }> = [];
     submitBadgeJob({
       rawSpec: rawSpec(),
@@ -85,7 +85,7 @@ describe('测试 4：锁 —— 并发提交被拒绝，不是排队', () => {
     expect(() => parseBadgeSpec({ ...SAFE_SPEC_JSON, when: { kind: 'op', name: 'and', args: [] } })).toThrow();
   });
 
-  it('acquireLock 用 O_EXCL：同一把锁只有一个成功', () => {
+  it('acquireLock 用 O_EXCL：同一把锁只有一个成功', async () => {
     ensureOutDirs(repo.adminRoot);
     const lock = {
       runId: 'a',
@@ -99,7 +99,7 @@ describe('测试 4：锁 —— 并发提交被拒绝，不是排队', () => {
     expect(again.ok).toBe(false);
   });
 
-  it('stale 锁（pid 已消失）：默认拒绝并点名原因；--force 才接管', () => {
+  it('stale 锁（pid 已消失）：默认拒绝并点名原因；--force 才接管', async () => {
     ensureOutDirs(repo.adminRoot);
     writeFileSync(
       addBadgePaths(repo.adminRoot).lockFile,
@@ -129,7 +129,7 @@ describe('测试 4：锁 —— 并发提交被拒绝，不是排队', () => {
     expect(after.lock.runId).toBe('run-4');
   });
 
-  it('锁文件损坏时按 stale 处理（宁可拒绝，也不并发）', () => {
+  it('锁文件损坏时按 stale 处理（宁可拒绝，也不并发）', async () => {
     ensureOutDirs(repo.adminRoot);
     writeFileSync(addBadgePaths(repo.adminRoot).lockFile, '{ 这不是 JSON', 'utf8');
     expect(readLock(repo.adminRoot).kind).toBe('stale');
@@ -137,7 +137,7 @@ describe('测试 4：锁 —— 并发提交被拒绝，不是排队', () => {
 });
 
 describe('测试 5：状态文件', () => {
-  it('writeStatus/readStatus 往返一致（原子写：临时文件 + rename）', () => {
+  it('writeStatus/readStatus 往返一致（原子写：临时文件 + rename）', async () => {
     const status = makeStatus({
       runId: 'r1',
       spec: { id: 'a', name: 'n', family: 'gray', group: null },
@@ -151,9 +151,9 @@ describe('测试 5：状态文件', () => {
     expect(view.interrupted).toBe(false);
   });
 
-  it('流水线把每个阶段按顺序写进状态文件', () => {
+  it('流水线把每个阶段按顺序写进状态文件', async () => {
     const seen: string[] = [];
-    const outcome = runPipeline(
+    const outcome = await runPipeline(
       { runId: 'run-phases', spec: spec(), logPath: 'log' },
       pipelineDeps(repo, {
         onStatus: status => {
@@ -170,7 +170,7 @@ describe('测试 5：状态文件', () => {
     expect(seen.indexOf('enumerate')).toBeLessThan(seen.indexOf('idempotency'));
   });
 
-  it('子进程中途死亡：下一次读取能发现「有一个没跑完的管道」', () => {
+  it('子进程中途死亡：下一次读取能发现「有一个没跑完的管道」', async () => {
     writeStatus(repo.adminRoot, makeStatus({
       runId: 'died',
       spec: { id: 'a', name: 'n', family: 'gray', group: null },
@@ -185,7 +185,7 @@ describe('测试 5：状态文件', () => {
     expect(view.interruption).toContain('enumerate');
   });
 
-  it('只有 stale 锁、没有状态文件时也能发现异常', () => {
+  it('只有 stale 锁、没有状态文件时也能发现异常', async () => {
     ensureOutDirs(repo.adminRoot);
     writeFileSync(
       addBadgePaths(repo.adminRoot).lockFile,
@@ -197,8 +197,8 @@ describe('测试 5：状态文件', () => {
     expect(view.interruption).toContain('lost');
   });
 
-  it('状态文件内容是合法 JSON 且带时间戳/阶段计数（UI 轮询的契约）', () => {
-    runPipeline(
+  it('状态文件内容是合法 JSON 且带时间戳/阶段计数（UI 轮询的契约）', async () => {
+    await runPipeline(
       { runId: 'run-json', spec: spec(), logPath: 'log' },
       pipelineDeps(repo, { onStatus: status => writeStatus(repo.adminRoot, status) }),
     );
@@ -211,7 +211,7 @@ describe('测试 5：状态文件', () => {
     expect(parsed.logPath).toBe('log');
   });
 
-  it('状态文件损坏时 readStatus 不抛异常（页面不能因此 500）', () => {
+  it('状态文件损坏时 readStatus 不抛异常（页面不能因此 500）', async () => {
     ensureOutDirs(repo.adminRoot);
     writeFileSync(addBadgePaths(repo.adminRoot).statusFile, '{坏掉的', 'utf8');
     const view = readStatus(repo.adminRoot);
@@ -221,7 +221,7 @@ describe('测试 5：状态文件', () => {
 });
 
 describe('提交时必须立刻覆盖状态文件（否则 --wait 会读到上一次的结论）', () => {
-  it('submit 后 status.json 的 runId 立刻是本次作业', () => {
+  it('submit 后 status.json 的 runId 立刻是本次作业', async () => {
     // 先制造一份「上一次作业」的状态
     writeStatus(repo.adminRoot, makeStatus({
       runId: 'previous-run',
@@ -319,7 +319,7 @@ describe('观察者：waitForCompletion 不能在子进程写第一份状态之�
 describe('路径常量：CLI 里的 REPO_ROOT 必须真的指向仓库根', () => {
   // 这条是 E2E 抓出来的真实 bug：`new URL('../..')` 会落到 `<repo>/tools`，
   // 而单元测试全都注入 root，所以只有「常量本身」的断言能守住它。
-  it('REPO_ROOT 下有 pnpm-workspace.yaml 与 packages/shared/src/badges', () => {
+  it('REPO_ROOT 下有 pnpm-workspace.yaml 与 packages/shared/src/badges', async () => {
     expect(existsSync(join(REPO_ROOT, 'pnpm-workspace.yaml'))).toBe(true);
     expect(existsSync(join(REPO_ROOT, 'packages/shared/src/badges/culture.ts'))).toBe(true);
     expect(existsSync(join(ADMIN_ROOT, 'package.json'))).toBe(true);
@@ -328,7 +328,7 @@ describe('路径常量：CLI 里的 REPO_ROOT 必须真的指向仓库根', () =
 });
 
 describe('测试 5（补充）：临时目录隔离', () => {
-  it('夹具用的是系统临时目录，不碰真实仓库', () => {
+  it('夹具用的是系统临时目录，不碰真实仓库', async () => {
     expect(repo.root.startsWith(tmpdir())).toBe(true);
     expect(repo.root).toContain('huedle-addbadge-');
     const isolated = mkdtempSync(join(tmpdir(), 'huedle-isolated-'));

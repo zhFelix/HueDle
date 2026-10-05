@@ -71,12 +71,12 @@ describe('add-badge / rollback 子命令参数', () => {
     expect(args).toMatchObject({ command: 'add-badge', ts: 'c => c.r > 0', family: 'gray' });
   });
 
-  it('--helper-eval 可重复，--no-wait 关掉等待', () => {
+  it('--helper 可重复（依赖名字列表），--no-wait 关掉等待', () => {
     const args = parseAdminArgs([
-      'add-badge', '--ts', 'f(c)', '--id', 'x', '--name', '甲', '--description', 'd', '--family', 'casino',
-      '--helper-eval', 'f=c => true', '--helper-eval', 'g=c => false', '--no-wait',
+      'add-badge', '--ts', 'onRanks(c)', '--id', 'x', '--name', '甲', '--description', 'd', '--family', 'casino',
+      '--helper', 'onRanks', '--helper', 'ranksAtLeast', '--no-wait',
     ]);
-    expect(args).toMatchObject({ helperEvals: ['f=c => true', 'g=c => false'], wait: false });
+    expect(args).toMatchObject({ helpers: ['onRanks', 'ranksAtLeast'], wait: false });
   });
 
   it('吃掉 pnpm 传下来的 `--` 分隔符（文档推荐的写法）', () => {

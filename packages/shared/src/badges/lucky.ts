@@ -4,7 +4,7 @@ import { channelSum } from './helpers';
 
 /** HEX 的 6 位十六进制数字（去掉前导 `#`），契约保证为大写。 */
 // private
-const hexDigits = (hex: string): string => hex.slice(1);
+export const hexDigits = (hex: string): string => hex.slice(1);
 
 /**
  * 判定 6 位十六进制数字中是否出现连续三个相同数字。
@@ -12,7 +12,7 @@ const hexDigits = (hex: string): string => hex.slice(1);
  * 覆盖全部 4 个长度为 3 的窗口，允许跨字节边界。
  */
 // private
-const hasTripleRun = (hex: string, digit: string): boolean => {
+export const hasTripleRun = (hex: string, digit: string): boolean => {
   const s = hexDigits(hex);
   const run = digit + digit + digit;
   return s.slice(0, 3) === run || s.slice(1, 4) === run ||
@@ -21,7 +21,7 @@ const hasTripleRun = (hex: string, digit: string): boolean => {
 
 /** 统计某个十六进制数字在 6 位中出现的次数。 */
 // private
-const countDigit = (hex: string, digit: string): number => {
+export const countDigit = (hex: string, digit: string): number => {
   const s = hexDigits(hex);
   let count = 0;
   for (let i = 0; i < s.length; i += 1) {

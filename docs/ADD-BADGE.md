@@ -154,6 +154,43 @@ isGray  hexBytes  toHexByte
 `check` 的参数是 `ColorInfo`（定义见 `packages/shared/src/types.ts`）：
 顶层是 `r` / `g` / `b` / `hex`，**HSL 在子对象里**——是 `c.hsl.h` / `c.hsl.s` / `c.hsl.l`，不是 `c.h`。
 
+### 手写路径：引用家族文件里的 private helper
+
+当判定逻辑复杂到 `helpers.ts` 的冻结词汇表装不下时（约 27% 的徽章形态），可以走**手写路径**：
+`check` 写成一段**单表达式**，直接引用目标家族文件里已有的 private helper（`const` 箭头函数）。
+
+```jsonc
+{
+  "id": "casino-pair-probe", "name": "探测", "description": "六位里至少一对相同",
+  "family": "casino",
+  "handwritten": {
+    "check": "onRanks(c, counts => ranksAtLeast(counts, 2) >= 1)",
+    // 只给**依赖名字列表**（不是实现！）
+    "evalHelpers": ["onRanks", "ranksAtLeast"]
+  }
+}
+```
+
+干跑会**直接 `import` 目标家族文件里的真品**来求值（工具本身跑在 `tsx` 下），因此：
+
+- `evalHelpers` 只是**名字列表**，干跑不再接受任何作者提供的实现副本——
+  「干跑求值的东西」与「写进仓库的东西」必然是同一份代码，**副本漂移这一失效模式被彻底移除**；
+- 被引用的 helper 必须是**顶层 `const` 声明且带 `export`**（只加 `export`，不改实现），否则干跑报错终止；
+- 降级一律是**报错中止**：`import` 失败 / 名字不存在（没声明、没 `export`）/ 求值抛异常，
+  都不会静默退回任何副本，工作区零改动。
+
+> **加新 helper 的流程（顺序不能反）：先把 helper 单独提交，再加徽章。**
+>
+> `tools/admin` 把**家族文件本身**算作受影响路径，而流水线在受影响路径有未提交改动时
+> **拒绝开跑**（退出码 7，见 `pipeline.ts` 的 `dirty.length > 0`）。所以：
+>
+> 1. 在 `packages/shared/src/badges/<family>.ts` 里加 `export const myHelper = …;`；
+> 2. `git add` + `git commit`（让家族文件重新变干净）；
+> 3. 再提交引用 `myHelper` 的徽章 spec。
+>
+> **不要**为了让「先写盘再 import」可行去放松那条脏工作区守卫——它的用途是「不覆盖别人的工作」，
+> 风险更大。顺序反过来只会被明确拒绝，不会产生半截状态。
+
 ### 字段约束速查
 
 | 字段 | 约束 |

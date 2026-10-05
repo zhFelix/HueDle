@@ -30,7 +30,7 @@ import type { StatsReport, SectionResult } from '../report';
 import type { Table } from '../analyze';
 import { fmtInt, fmtShare } from '../analyze';
 import { escapeHtml } from '../render/html';
-import type { MetricId } from '../stats';
+import { METRICS, type MetricDef, type MetricId } from '../stats';
 
 /** 可切换的时间窗口（至少 7 / 30 / 90）。 */
 export const UI_WINDOWS: readonly number[] = [7, 30, 90];
@@ -46,22 +46,14 @@ export const UI_ROW_LIMIT = 10;
 export const UI_OVERVIEW_ID = 'overview';
 
 /**
- * 左栏每一项的**短名**（完整标题太长、只出现在右栏的 `<h2>` 里）。
+ * 指标 id → 指标对象（`stats.ts` 是**唯一**的数据源）。
  *
- * 为什么单独一份而不是直接抄 `section.title`：左栏是导航，标题是详情；
- * 而且这样一来「右侧只渲染选中的那一项」可以被严格断言——未选中指标的
- * **完整标题**在整页里一个字都不出现（短名不会等于任何一条完整标题）。
+ * 侧栏的短名来自 `metric.navLabel`，与卡片标题同源，因此**不可能再出现两份互不相干的数据**。
+ * `Record<MetricId, MetricDef>` 让类型层面保证 M1–M8 一个都不缺。
  */
-export const UI_NAV_LABELS: Readonly<Record<MetricId, string>> = {
-  M1: '抽取量与唯一约束',
-  M2: '新增与回访',
-  M3: '沉默分桶与一次性',
-  M4: '徽章命中率',
-  M5: '幽灵徽章 id',
-  M6: '稀有度漂移',
-  M7: 'cp 分布',
-  M8: '完整性哨兵',
-};
+const METRIC_BY_ID: Readonly<Record<MetricId, MetricDef>> = Object.fromEntries(
+  METRICS.map(metric => [metric.id, metric]),
+) as Record<MetricId, MetricDef>;
 
 /** 概览项在左栏里的短名。 */
 export const UI_OVERVIEW_LABEL = '窗口总览';
@@ -363,7 +355,7 @@ function renderSidebar(report: StatsReport, selected: string, days: number): str
     { id: UI_OVERVIEW_ID, label: UI_OVERVIEW_LABEL },
     ...report.sections.map(section => ({
       id: String(section.id),
-      label: UI_NAV_LABELS[section.id] ?? '',
+      label: METRIC_BY_ID[section.id].navLabel,
     })),
   ];
   const metrics = items

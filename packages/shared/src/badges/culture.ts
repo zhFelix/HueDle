@@ -6,7 +6,7 @@ import type { BadgeDef } from '../types';
  * 契约保证 `ColorInfo.hex` 为大写、带 `#`、恒 7 字符，故直接全等比较即可。
  */
 // private
-const exactHex = (hex: string, target: string): boolean => hex === target;
+export const exactHex = (hex: string, target: string): boolean => hex === target;
 
 export const cultureBadges: BadgeDef[] = [
   {

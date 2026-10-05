@@ -386,13 +386,13 @@ describe('附加：draftFieldsFromRawSpec 是 draftToRawSpec 的逆（手写路�
       mode: 'handwritten',
       when: '',
       check: 'onRanks(c, counts => counts.filter(n => n >= 5).length === 1)',
-      evalHelpers: '{"onRanks":"color => color.r"}',
+      evalHelpers: '["onRanks"]',
     }));
     const raw = draftToRawSpec(draft);
     const back = draftFieldsFromRawSpec(raw);
     expect(back.mode).toBe('handwritten');
     expect(back.check).toBe(draft.fields.check);
-    expect(JSON.parse(back.evalHelpers)).toEqual({ onRanks: 'color => color.r' });
+    expect(JSON.parse(back.evalHelpers)).toEqual(['onRanks']);
     // 再正向翻译一次得到等价 spec。
     expect(draftToRawSpec({ ...draft, fields: back })).toEqual(raw);
   });

@@ -66,12 +66,8 @@ export function buildSpecFromArgs(args: AddBadgeCommand): BuiltSpec {
     if (missing.length > 0) {
       throw new UsageError(`--ts 需要同时给出：${missing.map(key => `--${key}`).join('、')}`);
     }
-    const evalHelpers: Record<string, string> = {};
-    for (const rawHelper of args.helperEvals) {
-      const index = rawHelper.indexOf('=');
-      if (index <= 0) throw new UsageError(`--helper-eval 的格式是 name=<js 源码>，收到：${rawHelper}`);
-      evalHelpers[rawHelper.slice(0, index).trim()] = rawHelper.slice(index + 1).trim();
-    }
+    // 依赖名字列表：干跑会自己 import 目标家族文件里的真品，作者不再提供实现。
+    const evalHelpers = args.helpers.map(name => name.trim()).filter(Boolean);
     const raw = {
       id: args.id,
       name: args.name,
@@ -80,7 +76,7 @@ export function buildSpecFromArgs(args: AddBadgeCommand): BuiltSpec {
       group: args.group ?? null,
       handwritten: {
         check: args.ts,
-        ...(Object.keys(evalHelpers).length > 0 ? { evalHelpers } : {}),
+        ...(evalHelpers.length > 0 ? { evalHelpers } : {}),
       },
     };
     return { kind: 'single', raw, spec: parseBadgeSpec(raw) };

@@ -16,7 +16,7 @@ import { spawn } from 'node:child_process';
 import { closeSync, openSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertIdUnique, assertNameUniqueInFamily } from './families';
-import { compileSpec } from './compile';
+import { analyzeSpec } from './compile';
 import { assertBatchInternalUnique, summarizeSpecs, EXIT_INTERRUPTED, EXIT_LOCKED } from './pipeline';
 import { SpecError, type BadgeSpec } from './spec';
 import {
@@ -181,7 +181,8 @@ function submitJob(options: InternalSubmitOptions): SubmitResult {
       assertNameUniqueInFamily(root, spec.family, spec.name);
     }
     assertBatchInternalUnique(specs);
-    for (const spec of specs) compileSpec(spec, root);
+    // 只做同步静态检查（不 import 真品，那一步在子进程的写盘前干跑里做）。
+    for (const spec of specs) analyzeSpec(spec, root);
   } catch (err) {
     const reason = err instanceof SpecError ? err.message : err instanceof Error ? err.message : String(err);
     return { ok: false, exitCode: 2, reason: `spec 校验失败（未写任何文件）：${reason}` };

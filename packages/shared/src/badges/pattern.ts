@@ -3,16 +3,16 @@ import { hexBytes } from './helpers';
 import type { BadgeDef, ColorInfo } from '../types';
 
 // private
-const bytes = (color: ColorInfo): [string, string, string] => {
+export const bytes = (color: ColorInfo): [string, string, string] => {
   const [a, b, c] = hexBytes(color.hex);
   return [a.toUpperCase(), b.toUpperCase(), c.toUpperCase()];
 };
 
 // private
-const hexChars = (color: ColorInfo): string => bytes(color).join('');
+export const hexChars = (color: ColorInfo): string => bytes(color).join('');
 
 // private
-const allCharsIn = (color: ColorInfo, allowed: string): boolean => {
+export const allCharsIn = (color: ColorInfo, allowed: string): boolean => {
   const chars = hexChars(color);
   for (let i = 0; i < chars.length; i += 1) {
     if (!allowed.includes(chars[i])) return false;
@@ -21,7 +21,7 @@ const allCharsIn = (color: ColorInfo, allowed: string): boolean => {
 };
 
 // private：六个字符是否两两不同
-const allCharsDistinct = (color: ColorInfo): boolean => {
+export const allCharsDistinct = (color: ColorInfo): boolean => {
   const chars = hexChars(color);
   let seen = '';
   for (let i = 0; i < chars.length; i += 1) {

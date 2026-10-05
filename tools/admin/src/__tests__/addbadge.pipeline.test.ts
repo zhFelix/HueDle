@@ -51,10 +51,10 @@ function gitExitCode(args: string[]): number {
 }
 
 describe('测试 6：回滚真能还原（枚举失败注入）', () => {
-  it('注入 enumerate 失败 → 文件逐字节回到快照，且 git diff --exit-code 通过', () => {
+  it('注入 enumerate 失败 → 文件逐字节回到快照，且 git diff --exit-code 通过', async () => {
     const before = snapshotBytes();
     const calls: string[] = [];
-    const outcome = runPipeline(job(), pipelineDeps(repo, { exec: createFakeExec(repo.root, { enumerate: 'fail' }) }));
+    const outcome = await runPipeline(job(), pipelineDeps(repo, { exec: createFakeExec(repo.root, { enumerate: 'fail' }) }));
 
     expect(outcome.exitCode).toBe(EXIT_ROLLED_BACK);
     expect(outcome.state).toBe('rolled_back');
@@ -70,14 +70,14 @@ describe('测试 6：回滚真能还原（枚举失败注入）', () => {
     void calls;
   });
 
-  it('「复制回去 + 证明回到绿」：回滚会真的跑一遍 packages/shared test', () => {
+  it('「复制回去 + 证明回到绿」：回滚会真的跑一遍 packages/shared test', async () => {
     const calls: string[] = [];
-    runPipeline(job(), pipelineDeps(repo, { exec: createFakeExec(repo.root, { enumerate: 'fail', calls }) }));
+    await runPipeline(job(), pipelineDeps(repo, { exec: createFakeExec(repo.root, { enumerate: 'fail', calls }) }));
     expect(calls.filter(command => command.includes('test')).length).toBeGreaterThan(0);
   });
 
-  it('回滚本身失败（还原后 test 仍红）→ 退出码 4，绝不静默', () => {
-    const outcome = runPipeline(
+  it('回滚本身失败（还原后 test 仍红）→ 退出码 4，绝不静默', async () => {
+    const outcome = await runPipeline(
       job(),
       pipelineDeps(repo, { exec: createFakeExec(repo.root, { enumerate: 'fail', test: 'fail' }) }),
     );
@@ -86,32 +86,32 @@ describe('测试 6：回滚真能还原（枚举失败注入）', () => {
     expect(outcome.conclusion).toContain('人工介入');
   });
 
-  it('typecheck 失败 → 回滚，退出码 2', () => {
+  it('typecheck 失败 → 回滚，退出码 2', async () => {
     const before = snapshotBytes();
-    const outcome = runPipeline(job(), pipelineDeps(repo, { exec: createFakeExec(repo.root, { typecheck: 'fail' }) }));
+    const outcome = await runPipeline(job(), pipelineDeps(repo, { exec: createFakeExec(repo.root, { typecheck: 'fail' }) }));
     expect(outcome.exitCode).toBe(EXIT_ROLLED_BACK);
     expect(outcome.failureClass).toBe('typecheck');
     expect(readFileSync(rel('packages/shared/src/badges/gray.ts'), 'utf8')).toBe(before['packages/shared/src/badges/gray.ts']);
   });
 
-  it('enumerate 超时（可能半写）→ 回滚，退出码 2', () => {
+  it('enumerate 超时（可能半写）→ 回滚，退出码 2', async () => {
     const before = snapshotBytes();
-    const outcome = runPipeline(job(), pipelineDeps(repo, { exec: createFakeExec(repo.root, { enumerate: 'timeout' }) }));
+    const outcome = await runPipeline(job(), pipelineDeps(repo, { exec: createFakeExec(repo.root, { enumerate: 'timeout' }) }));
     expect(outcome.exitCode).toBe(EXIT_ROLLED_BACK);
     expect(outcome.failureClass).toBe('enumerate-timeout');
     expect(readFileSync(rel('packages/shared/src/pricing.gen.ts'), 'utf8')).toBe(before['packages/shared/src/pricing.gen.ts']);
   });
 
-  it('幂等性 md5 不一致 → 回滚，退出码 2', () => {
+  it('幂等性 md5 不一致 → 回滚，退出码 2', async () => {
     const before = snapshotBytes();
-    const outcome = runPipeline(job(), pipelineDeps(repo, { exec: createFakeExec(repo.root, { enumerate: 'nondeterministic' }) }));
+    const outcome = await runPipeline(job(), pipelineDeps(repo, { exec: createFakeExec(repo.root, { enumerate: 'nondeterministic' }) }));
     expect(outcome.exitCode).toBe(EXIT_ROLLED_BACK);
     expect(outcome.failureClass).toBe('idempotency');
     expect(readFileSync(rel('packages/shared/src/badges/gray.ts'), 'utf8')).toBe(before['packages/shared/src/badges/gray.ts']);
   });
 
-  it('supersession 报「新徽章 100% 被取代」→ 回滚，退出码 2', () => {
-    const outcome = runPipeline(
+  it('supersession 报「新徽章 100% 被取代」→ 回滚，退出码 2', async () => {
+    const outcome = await runPipeline(
       job(),
       pipelineDeps(repo, { exec: createFakeExec(repo.root, { supersession: 'dead', deadBadgeId: SAFE_SPEC_JSON.id }) }),
     );
@@ -120,26 +120,26 @@ describe('测试 6：回滚真能还原（枚举失败注入）', () => {
     expect(readFileSync(rel('packages/shared/src/badges/gray.ts'), 'utf8')).not.toContain(SAFE_SPEC_JSON.id);
   });
 
-  it('只有 docs.test.ts 失败 → 重跑 docs 后再判（不误伤）', () => {
+  it('只有 docs.test.ts 失败 → 重跑 docs 后再判（不误伤）', async () => {
     const calls: string[] = [];
-    const outcome = runPipeline(job(), pipelineDeps(repo, { exec: createFakeExec(repo.root, { test: 'docs-only-fail', calls }) }));
+    const outcome = await runPipeline(job(), pipelineDeps(repo, { exec: createFakeExec(repo.root, { test: 'docs-only-fail', calls }) }));
     expect(outcome.exitCode).toBe(0);
     expect(calls.filter(command => command.includes('docs')).length).toBeGreaterThanOrEqual(2);
   });
 
-  it('普通 test 失败 → 回滚，退出码 2', () => {
+  it('普通 test 失败 → 回滚，退出码 2', async () => {
     const calls: string[] = [];
-    const outcome = runPipeline(job(), pipelineDeps(repo, { exec: createFakeExec(repo.root, { test: 'fail-once', calls }) }));
+    const outcome = await runPipeline(job(), pipelineDeps(repo, { exec: createFakeExec(repo.root, { test: 'fail-once', calls }) }));
     expect(outcome.exitCode).toBe(EXIT_ROLLED_BACK);
     expect(outcome.failureClass).toBe('test');
   });
 });
 
 describe('测试 7：全局平衡类失败 → 保留现场、不自动回滚、退出码 3', () => {
-  it('bucketsSelfConsistent 失败：退出码 3，工作区保持脏（不删复核材料）', () => {
+  it('bucketsSelfConsistent 失败：退出码 3，工作区保持脏（不删复核材料）', async () => {
     const before = snapshotBytes();
     const calls: string[] = [];
-    const outcome = runPipeline(
+    const outcome = await runPipeline(
       job(),
       pipelineDeps(repo, { exec: createFakeExec(repo.root, { enumerate: 'global', calls }) }),
     );
@@ -161,7 +161,7 @@ describe('测试 7：全局平衡类失败 → 保留现场、不自动回滚、
     expect(existsSync(outcome.snapshotPath!)).toBe(true);
   });
 
-  it('分类器只认「带 caret 的失败行」，不会被源码框的上下文误判', () => {
+  it('分类器只认「带 caret 的失败行」，不会被源码框的上下文误判', async () => {
     const frame = [
       'AssertionError: expected [] to deeply equal []',
       '    868|       expect(',
@@ -179,7 +179,7 @@ describe('测试 7：全局平衡类失败 → 保留现场、不自动回滚、
     expect(classifyEnumerateFailure('随便什么', false)).toBe('enumerate');
   });
 
-  it('supersession 报告解析：只看第 1 节，不会把第 2 节的明细当成死徽章', () => {
+  it('supersession 报告解析：只看第 1 节，不会把第 2 节的明细当成死徽章', async () => {
     const report = [
       '# 取代审计',
       '## 1. 结论',
@@ -192,7 +192,7 @@ describe('测试 7：全局平衡类失败 → 保留现场、不自动回滚、
     expect(findDeadBadge(dead, 'x')).toBe(true);
   });
 
-  it('test 失败文件解析（docs-only 归因）', () => {
+  it('test 失败文件解析（docs-only 归因）', async () => {
     expect(failingTestFiles(' ❯ src/badges/__tests__/docs.test.ts (1 test | 1 failed)')).toEqual([
       'src/badges/__tests__/docs.test.ts',
     ]);
@@ -202,12 +202,12 @@ describe('测试 7：全局平衡类失败 → 保留现场、不自动回滚、
 });
 
 describe('测试 8：受影响路径有未提交改动 → 默认拒绝开跑', () => {
-  it('dirty → 退出码 7，且不写任何东西（含快照）', () => {
+  it('dirty → 退出码 7，且不写任何东西（含快照）', async () => {
     const gray = rel('packages/shared/src/badges/gray.ts');
     appendFileSync(gray, '\n// 别人未提交的改动\n', 'utf8');
     const dirtyContent = readFileSync(gray, 'utf8');
 
-    const outcome = runPipeline(job(), pipelineDeps(repo));
+    const outcome = await runPipeline(job(), pipelineDeps(repo));
 
     expect(outcome.exitCode).toBe(EXIT_DIRTY_WORKTREE);
     expect(outcome.state).toBe('refused');
@@ -220,16 +220,16 @@ describe('测试 8：受影响路径有未提交改动 → 默认拒绝开跑', 
     expect(existsSync(snapshotsDir) ? readdirSync(snapshotsDir) : []).toEqual([]);
   });
 
-  it('脏的只是「不受影响的路径」时不拒绝（不误伤）', () => {
+  it('脏的只是「不受影响的路径」时不拒绝（不误伤）', async () => {
     mkdirSync(rel('docs'), { recursive: true });
     writeFileSync(rel('docs/UNRELATED.md'), '无关文件\n', 'utf8');
-    const outcome = runPipeline(job(), pipelineDeps(repo));
+    const outcome = await runPipeline(job(), pipelineDeps(repo));
     expect(outcome.exitCode).toBe(0);
   });
 });
 
 describe('干跑失败：工作区零改动、零快照', () => {
-  it('hits=0 的候选 → 退出码 2、state=refused、一个字节都没写', () => {
+  it('hits=0 的候选 → 退出码 2、state=refused、一个字节都没写', async () => {
     const before = snapshotBytes();
     const specZero = parseBadgeSpec({
       id: 'gray-never-hits',
@@ -238,7 +238,7 @@ describe('干跑失败：工作区零改动、零快照', () => {
       family: 'gray',
       when: { all: [{ eq: [{ field: 'r' }, 0] }, { eq: [{ field: 'r' }, 1] }] },
     });
-    const outcome = runPipeline({ runId: 'r0', spec: specZero, logPath: 'log' }, pipelineDeps(repo));
+    const outcome = await runPipeline({ runId: 'r0', spec: specZero, logPath: 'log' }, pipelineDeps(repo));
     expect(outcome.exitCode).toBe(EXIT_ROLLED_BACK);
     expect(outcome.state).toBe('refused');
     expect(outcome.failureClass).toBe('dryrun');
@@ -249,7 +249,7 @@ describe('干跑失败：工作区零改动、零快照', () => {
     expect(existsSync(snapshotsDir) ? readdirSync(snapshotsDir) : []).toEqual([]);
   });
 
-  it('与既有徽章必然蕴含的候选 → 干跑拦下（不进入写盘）', () => {
+  it('与既有徽章必然蕴含的候选 → 干跑拦下（不进入写盘）', async () => {
     const collide = parseBadgeSpec({
       id: 'gray-collide',
       name: '撞车',
@@ -257,13 +257,13 @@ describe('干跑失败：工作区零改动、零快照', () => {
       family: 'gray',
       when: { all: [{ eq: [{ field: 'r' }, 0] }, { eq: [{ field: 'g' }, 0] }, { eq: [{ field: 'b' }, 0] }] },
     });
-    const outcome = runPipeline({ runId: 'r1', spec: collide, logPath: 'log' }, pipelineDeps(repo));
+    const outcome = await runPipeline({ runId: 'r1', spec: collide, logPath: 'log' }, pipelineDeps(repo));
     expect(outcome.exitCode).toBe(EXIT_ROLLED_BACK);
     expect(outcome.failureClass).toBe('dryrun');
     expect(outcome.conclusion).toContain('gray-black');
   });
 
-  it('spec 校验在准备阶段就失败（id 重复）→ 工作区零改动', () => {
+  it('spec 校验在准备阶段就失败（id 重复）→ 工作区零改动', async () => {
     const duplicate = parseBadgeSpec({
       id: 'gray-prime',
       name: '重复 id',
@@ -271,13 +271,13 @@ describe('干跑失败：工作区零改动、零快照', () => {
       family: 'gray',
       when: { eq: [{ field: 'r' }, 0] },
     });
-    const outcome = runPipeline({ runId: 'r2', spec: duplicate, logPath: 'log' }, pipelineDeps(repo));
+    const outcome = await runPipeline({ runId: 'r2', spec: duplicate, logPath: 'log' }, pipelineDeps(repo));
     expect(outcome.exitCode).toBe(EXIT_ROLLED_BACK);
     expect(outcome.state).toBe('refused');
     expect(outcome.conclusion).toContain('已存在');
   });
 
-  it('helper 没 import → 写盘前拒绝（不靠 tsc 在写盘后才发现）', () => {
+  it('helper 没 import → 写盘前拒绝（不靠 tsc 在写盘后才发现）', async () => {
     const needsMissingHelper = parseBadgeSpec({
       id: 'gray-missing-helper',
       name: '缺 import',
@@ -285,15 +285,15 @@ describe('干跑失败：工作区零改动、零快照', () => {
       family: 'gray',
       when: { isPalindromeNumber: true },
     });
-    const outcome = runPipeline({ runId: 'r3', spec: needsMissingHelper, logPath: 'log' }, pipelineDeps(repo));
+    const outcome = await runPipeline({ runId: 'r3', spec: needsMissingHelper, logPath: 'log' }, pipelineDeps(repo));
     expect(outcome.exitCode).toBe(EXIT_ROLLED_BACK);
     expect(outcome.conclusion).toContain('isPalindromeNumber');
   });
 });
 
 describe('成功路径（阶段全绿）', () => {
-  it('退出码 0；新徽章进了文件、定价/文档已重生成、快照被清掉', () => {
-    const outcome = runPipeline(job(), pipelineDeps(repo));
+  it('退出码 0；新徽章进了文件、定价/文档已重生成、快照被清掉', async () => {
+    const outcome = await runPipeline(job(), pipelineDeps(repo));
     expect(outcome.exitCode).toBe(0);
     expect(outcome.state).toBe('succeeded');
     expect(outcome.hits).toBe(16);
@@ -309,16 +309,16 @@ describe('成功路径（阶段全绿）', () => {
     expect(existsSync(snapshotsDir) ? readdirSync(snapshotsDir) : []).toEqual([]);
   });
 
-  it('结论里明确「不自动 commit」，并提醒家族备注文件', () => {
-    const outcome = runPipeline(job(), pipelineDeps(repo));
+  it('结论里明确「不自动 commit」，并提醒家族备注文件', async () => {
+    const outcome = await runPipeline(job(), pipelineDeps(repo));
     expect(outcome.conclusion).toContain('不自动 commit');
     expect(outcome.conclusion).toContain('docs/badges/');
   });
 });
 
 describe('注入式错误也必须走回滚（不能绕过）', () => {
-  it('既有徽章列表读取失败 → 干跑阶段失败、零写盘', () => {
-    const outcome = runPipeline(
+  it('既有徽章列表读取失败 → 干跑阶段失败、零写盘', async () => {
+    const outcome = await runPipeline(
       job(),
       pipelineDeps(repo, {
         existingChecks: () => {
@@ -331,7 +331,7 @@ describe('注入式错误也必须走回滚（不能绕过）', () => {
     expect(readFileSync(rel('packages/shared/src/badges/gray.ts'), 'utf8')).not.toContain(SAFE_SPEC_JSON.id);
   });
 
-  it('SpecError 在准备阶段 → 不会被当成内部错误吞掉', () => {
+  it('SpecError 在准备阶段 → 不会被当成内部错误吞掉', async () => {
     const bad = { ...SAFE_SPEC_JSON, id: 'X-BAD' };
     expect(() => parseBadgeSpec(bad)).toThrow(SpecError);
     void fakeExisting;

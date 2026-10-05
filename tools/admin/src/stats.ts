@@ -23,6 +23,13 @@ export interface ExtraQuery {
 export interface MetricDef {
   id: MetricId;
   title: string;
+  /**
+   * 左栏导航的**短名**（完整标题太长、只出现在右栏的 `<h2>` 里）。
+   *
+   * 它是这个指标对象的字段，而不是另一份平行常量：侧栏与卡片是**同一份数据**，
+   * 不可能再漂移。类型层面强制每个指标都提供。
+   */
+  navLabel: string;
   /** 这条数字能导出的人要做的决定。 */
   question: string;
   sql: string;
@@ -58,6 +65,7 @@ export const METRICS: readonly MetricDef[] = [
   {
     id: 'M1',
     title: '每日抽取量 + 唯一约束哨兵',
+    navLabel: '抽取量与唯一约束',
     question: '产品今天还有没有人用；某天骤降＝抽取链路/部署出了问题，同时 daily_results 的唯一约束有没有被绕过。',
     params: ['start'],
     sql: `
@@ -73,6 +81,7 @@ SELECT date,
   {
     id: 'M2',
     title: '新增用户 vs 回访用户',
+    navLabel: '新增与回访',
     question: '增长是从哪来的；新增恒为 0＝不必谈拉新，新增有而回访恒为 0＝问题在留存不在渠道。',
     params: ['start'],
     sql: `
@@ -91,6 +100,7 @@ SELECT d.date,
   {
     id: 'M3',
     title: '沉默用户分桶 + 一次性用户占比',
+    navLabel: '沉默分桶与一次性',
     question: '召回值不值得做；以及"只抽过一天"的用户占比——它决定留存是不是真问题。',
     params: [],
     sql: `
@@ -112,6 +122,7 @@ SELECT CASE WHEN gap = 0 THEN '0' WHEN gap <= 7 THEN '1-7'
   {
     id: 'M4',
     title: '徽章实际命中率 vs 理论概率',
+    navLabel: '徽章命中率',
     question: '线上跑的徽章表与仓库代码是不是同一份（部署漂移）；有没有 check 写错（恒真/近恒真）；玩家实际稀有度是否符合预期。',
     params: ['start'],
     sql: `
@@ -129,6 +140,7 @@ SELECT b.badge_id, COUNT(*)::int AS hit_days
   {
     id: 'M5',
     title: '幽灵徽章 id（存档里有、代码里没有）',
+    navLabel: '幽灵徽章 id',
     question: '存档里是否在积累已删除/已改名的 id——restoreScore 会静默丢弃它们，导致玩家"图鉴缺一格、分变少"。',
     params: [],
     sql: `
@@ -142,6 +154,7 @@ SELECT b.badge_id, COUNT(*)::int AS n, MIN(d.date) AS first_seen
   {
     id: 'M6',
     title: '稀有度构成的时间漂移',
+    navLabel: '稀有度漂移',
     question: '徽章表/枚举改动有没有改变玩家每天抽到的东西；某档周占比突变＝分位表或阈值变了。',
     params: [],
     sql: `
@@ -156,6 +169,7 @@ SELECT date_trunc('week', date::date)::date::text AS wk,
   {
     id: 'M7',
     title: 'cp 分布漂移与离群',
+    navLabel: 'cp 分布',
     question: 'cp 是否随时间整体抬升（新增徽章最容易被忽略的副作用）；有没有不可能的离群值。',
     params: ['start'],
     sql: `
@@ -173,6 +187,7 @@ SELECT date,
   {
     id: 'M8',
     title: '数据完整性哨兵',
+    navLabel: '完整性哨兵',
     question: '其余 7 条统计的前提是否成立；任何 bad_* 非 0 都意味着有东西绕过 API 直接写了库。',
     params: ['now'],
     sql: `

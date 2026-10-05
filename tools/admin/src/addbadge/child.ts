@@ -38,7 +38,7 @@ export interface ChildJobFile {
   acceptedSpecHash?: string;
 }
 
-export function runChild(jobPath: string, adminRoot: string, root: string): number {
+export async function runChild(jobPath: string, adminRoot: string, root: string): Promise<number> {
   let job: ChildJobFile;
   try {
     job = JSON.parse(readFileSync(jobPath, 'utf8')) as ChildJobFile;
@@ -132,7 +132,7 @@ export function runChild(jobPath: string, adminRoot: string, root: string): numb
       },
     };
     const outcome = isBatch
-      ? runBatchPipeline(
+      ? await runBatchPipeline(
           {
             runId: job.runId,
             specs,
@@ -141,7 +141,7 @@ export function runChild(jobPath: string, adminRoot: string, root: string): numb
           },
           deps,
         )
-      : runPipeline(
+      : await runPipeline(
           {
             runId: job.runId,
             spec: specs[0]!,
@@ -209,6 +209,15 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
     console.error('用法：tsx src/addbadge/child.ts <job.json>');
     process.exitCode = 2;
   } else {
-    process.exitCode = runChild(jobPath, ADMIN_ROOT, REPO_ROOT);
+    // 刻意**不用 top-level await**：本文件也要能被 CJS 测试包装脚本 `require` 进来。
+    void runChild(jobPath, ADMIN_ROOT, REPO_ROOT).then(
+      code => {
+        process.exitCode = code;
+      },
+      err => {
+        console.error(`[addbadge] 子进程未捕获异常：${err instanceof Error ? err.stack ?? err.message : String(err)}`);
+        process.exitCode = EXIT_ROLLED_BACK;
+      },
+    );
   }
 }

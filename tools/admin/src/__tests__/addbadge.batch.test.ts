@@ -77,13 +77,13 @@ const snapshotCount = (): number => (existsSync(SNAPSHOT_DIR()) ? readdirSync(SN
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('批量测试 1：新 vs 新的必然蕴含被拦（核心新逻辑）', () => {
-  it('两条完全等价、group 不同 → 干跑拒绝，一个字节都没写、零快照', () => {
+  it('两条完全等价、group 不同 → 干跑拒绝，一个字节都没写、零快照', async () => {
     // 两条规则的命中集合完全相同（都等价），且不在同一个 group 里。
     const a = makeSpec({ id: 'gray-batch-a', name: '批量甲', description: 'B = 7' });
     const b = makeSpec({ id: 'gray-batch-b', name: '批量乙', description: 'B = 7' });
     const before = capture(repo.root, affectedPaths('gray'));
 
-    const outcome = runBatchPipeline(batchJob([a, b]), pipelineDeps(repo));
+    const outcome = await runBatchPipeline(batchJob([a, b]), pipelineDeps(repo));
 
     expect(outcome.exitCode).toBe(EXIT_ROLLED_BACK);
     expect(outcome.state).toBe('refused');
@@ -100,11 +100,11 @@ describe('批量测试 1：新 vs 新的必然蕴含被拦（核心新逻辑）'
     expect(snapshotCount()).toBe(0);
   });
 
-  it('A ⊂ B（一条是另一条的子集）→ 只算警告：停在【待确认】，不是失败', () => {
+  it('A ⊂ B（一条是另一条的子集）→ 只算警告：停在【待确认】，不是失败', async () => {
     // `b === 7` 命中集合 ⊂ `b < 128` 命中集合，且 group 不同。
     const narrow = makeSpec({ id: 'gray-batch-narrow', name: '窄规则', description: 'B = 7' });
     const wide = makeSpec({ id: 'gray-batch-wide', name: '宽规则', description: 'B < 128', when: { lt: [{ field: 'b' }, 128] } });
-    const outcome = runBatchPipeline(batchJob([narrow, wide]), pipelineDeps(repo));
+    const outcome = await runBatchPipeline(batchJob([narrow, wide]), pipelineDeps(repo));
     // 单向蕴含不再拒绝：状态是待确认（不是 refused），退出码是专用码 9。
     expect(outcome.exitCode).toBe(EXIT_AWAITING_CONFIRMATION);
     expect(outcome.state).toBe('awaiting_confirmation');
@@ -123,11 +123,11 @@ describe('批量测试 1：新 vs 新的必然蕴含被拦（核心新逻辑）'
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('批量测试 2：同 group 的互相蕴含是允许的（阶梯规则）', () => {
-  it('两条等价但 group 相同 → 干跑通过、全部落地', () => {
+  it('两条等价但 group 相同 → 干跑通过、全部落地', async () => {
     const a = makeSpec({ id: 'gray-ladder-5', name: '阶梯五', description: 'B = 7', group: 'batch-ladder' });
     const b = makeSpec({ id: 'gray-ladder-9', name: '阶梯九', description: 'B = 7', group: 'batch-ladder' });
 
-    const outcome = runBatchPipeline(batchJob([a, b]), pipelineDeps(repo));
+    const outcome = await runBatchPipeline(batchJob([a, b]), pipelineDeps(repo));
 
     expect(outcome.exitCode).toBe(0);
     expect(outcome.state).toBe('succeeded');
@@ -144,7 +144,7 @@ describe('批量测试 2：同 group 的互相蕴含是允许的（阶梯规则�
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('批量测试 3：全有或全无（一个事务）', () => {
-  it('第 2 条 hits=0 → 三条都没落地，所有受影响文件逐字节复原', () => {
+  it('第 2 条 hits=0 → 三条都没落地，所有受影响文件逐字节复原', async () => {
     const ok1 = makeSpec({ id: 'gray-ok-1', name: '甲条', description: 'B = 7' });
     const bad = makeSpec({
       id: 'gray-bad-2',
@@ -155,7 +155,7 @@ describe('批量测试 3：全有或全无（一个事务）', () => {
     const ok3 = makeSpec({ id: 'gray-ok-3', name: '丙条', description: 'B = 13', when: { eq: [{ field: 'b' }, 13] } });
     const before = capture(repo.root, affectedPaths('gray'));
 
-    const outcome = runBatchPipeline(batchJob([ok1, bad, ok3]), pipelineDeps(repo));
+    const outcome = await runBatchPipeline(batchJob([ok1, bad, ok3]), pipelineDeps(repo));
 
     expect(outcome.exitCode).toBe(EXIT_ROLLED_BACK);
     expect(outcome.state).toBe('refused');
@@ -169,7 +169,7 @@ describe('批量测试 3：全有或全无（一个事务）', () => {
     expect(snapshotCount()).toBe(0);
   });
 
-  it('三条都合法但写盘后 typecheck 失败 → 三条一起回滚、逐字节复原', () => {
+  it('三条都合法但写盘后 typecheck 失败 → 三条一起回滚、逐字节复原', async () => {
     const specs = [
       makeSpec({ id: 'gray-roll-1', name: '回滚一', description: 'B = 7' }),
       makeSpec({ id: 'gray-roll-2', name: '回滚二', description: 'B = 11', when: { eq: [{ field: 'b' }, 11] } }),
@@ -177,7 +177,7 @@ describe('批量测试 3：全有或全无（一个事务）', () => {
     ];
     const before = capture(repo.root, affectedPaths('gray'));
 
-    const outcome = runBatchPipeline(
+    const outcome = await runBatchPipeline(
       batchJob(specs),
       pipelineDeps(repo, { exec: createFakeExec(repo.root, { typecheck: 'fail' }) }),
     );
@@ -202,8 +202,8 @@ describe('批量测试 4：跨文件批量（3 条落在不同家族文件）', 
     makeSpec({ id: 'pure-cross-3', name: '跨文件纯', description: 'B = 13', family: 'pure', when: { eq: [{ field: 'b' }, 13] } }),
   ];
 
-  it('三条分别落到 gray/math/pure.ts，一次流水线全部成功', () => {
-    const outcome = runBatchPipeline(batchJob(crossSpecs()), pipelineDeps(repo));
+  it('三条分别落到 gray/math/pure.ts，一次流水线全部成功', async () => {
+    const outcome = await runBatchPipeline(batchJob(crossSpecs()), pipelineDeps(repo));
     expect(outcome.exitCode).toBe(0);
     expect(readFileSync(rel('packages/shared/src/badges/gray.ts'), 'utf8')).toContain("id: 'gray-cross-1',");
     expect(readFileSync(rel('packages/shared/src/badges/math.ts'), 'utf8')).toContain("id: 'math-cross-2',");
@@ -211,13 +211,13 @@ describe('批量测试 4：跨文件批量（3 条落在不同家族文件）', 
     expect(outcome.hitsBySpec?.map(item => item.id)).toEqual(['gray-cross-1', 'math-cross-2', 'pure-cross-3']);
   });
 
-  it('enumerate 失败 → 三个家族文件全部回滚、逐字节复原', () => {
+  it('enumerate 失败 → 三个家族文件全部回滚、逐字节复原', async () => {
     const before = capture(repo.root, [
       ...affectedPaths('gray'),
       ...affectedPaths('math'),
       ...affectedPaths('pure'),
     ]);
-    const outcome = runBatchPipeline(
+    const outcome = await runBatchPipeline(
       batchJob(crossSpecs()),
       pipelineDeps(repo, { exec: createFakeExec(repo.root, { enumerate: 'fail' }) }),
     );
@@ -234,13 +234,13 @@ describe('批量测试 4：跨文件批量（3 条落在不同家族文件）', 
 describe('批量测试 5：enumerate 对整批只跑一次（性能目标）', () => {
   const countEnumerate = (calls: string[]): number => calls.filter(command => command.includes('enumerate')).length;
 
-  it('批量 3 条的 enumerate 调用次数 === 单条，且不随 N 增长', () => {
+  it('批量 3 条的 enumerate 调用次数 === 单条，且不随 N 增长', async () => {
     // 两次运行各自用**全新的临时仓库**：上一次成功会留下未提交改动，同仓库再跑会被
     // 脏工作区检查（exit 7）拒绝——那是另一条安全性质，不该干扰这条性能断言。
     const singleRepo = createFakeRepo();
     const singleCalls: string[] = [];
     try {
-      const single = runBatchPipeline(
+      const single = await runBatchPipeline(
         batchJob([makeSpec({ id: 'gray-count-1', name: '计数一', description: 'B = 7' })]),
         pipelineDeps(singleRepo, { exec: createFakeExec(singleRepo.root, { calls: singleCalls }) }),
       );
@@ -252,7 +252,7 @@ describe('批量测试 5：enumerate 对整批只跑一次（性能目标）', (
     const batchRepo = createFakeRepo();
     const batchCalls: string[] = [];
     try {
-      const batch = runBatchPipeline(
+      const batch = await runBatchPipeline(
         batchJob([
           makeSpec({ id: 'gray-count-a', name: '计数甲', description: 'B = 7' }),
           makeSpec({ id: 'gray-count-b', name: '计数乙', description: 'B = 11', when: { eq: [{ field: 'b' }, 11] } }),
@@ -281,7 +281,7 @@ describe('批量测试 5：enumerate 对整批只跑一次（性能目标）', (
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('批量测试 6：supersession 里任意一条 100% 被取代 → 整批回滚', () => {
-  it('第 2 条是死徽章 → 退出码 2、三条全部回滚、点名死徽章', () => {
+  it('第 2 条是死徽章 → 退出码 2、三条全部回滚、点名死徽章', async () => {
     const specs = [
       makeSpec({ id: 'gray-sup-1', name: '取代一', description: 'B = 7' }),
       makeSpec({ id: 'gray-sup-2', name: '取代二', description: 'B = 11', when: { eq: [{ field: 'b' }, 11] } }),
@@ -289,7 +289,7 @@ describe('批量测试 6：supersession 里任意一条 100% 被取代 → 整�
     ];
     const before = capture(repo.root, affectedPaths('gray'));
 
-    const outcome = runBatchPipeline(
+    const outcome = await runBatchPipeline(
       batchJob(specs),
       pipelineDeps(repo, { exec: createFakeExec(repo.root, { supersession: 'dead', deadBadgeId: 'gray-sup-2' }) }),
     );
@@ -309,7 +309,7 @@ describe('批量测试 6：supersession 里任意一条 100% 被取代 → 整�
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('批量测试 7：单条路径（现有行为）不被批量改变', () => {
-  it('runPipeline(spec) 与 runBatchPipeline([spec]) 的结果与文件字节完全一致', () => {
+  it('runPipeline(spec) 与 runBatchPipeline([spec]) 的结果与文件字节完全一致', async () => {
     const specJson = {
       id: 'gray-single-echo',
       name: '单条回声',
@@ -321,13 +321,13 @@ describe('批量测试 7：单条路径（现有行为）不被批量改变', ()
 
     const singleRepo = createFakeRepo();
     try {
-      const single = runPipeline(
+      const single = await runPipeline(
         { runId: 'run-same', spec: parseBadgeSpec(specJson), logPath: 'log' },
         pipelineDeps(singleRepo),
       );
       const batchRepo = createFakeRepo();
       try {
-        const batch = runBatchPipeline(
+        const batch = await runBatchPipeline(
           { runId: 'run-same', specs: [parseBadgeSpec(specJson)], logPath: 'log' },
           pipelineDeps(batchRepo),
         );
@@ -345,11 +345,11 @@ describe('批量测试 7：单条路径（现有行为）不被批量改变', ()
     }
   });
 
-  it('批量内部 id 重复 → 写盘前拒绝，零写盘', () => {
+  it('批量内部 id 重复 → 写盘前拒绝，零写盘', async () => {
     const a = makeSpec({ id: 'gray-dup', name: '重一条', description: 'B = 7' });
     const b = makeSpec({ id: 'gray-dup', name: '重二条', description: 'B = 13' });
     const before = capture(repo.root, affectedPaths('gray'));
-    const outcome = runBatchPipeline(batchJob([a, b]), pipelineDeps(repo));
+    const outcome = await runBatchPipeline(batchJob([a, b]), pipelineDeps(repo));
     expect(outcome.exitCode).toBe(EXIT_ROLLED_BACK);
     expect(outcome.state).toBe('refused');
     expect(outcome.conclusion).toContain('gray-dup');
@@ -366,7 +366,7 @@ describe('批量接口：--spec 文件内容是数组即批量', () => {
   const rawA = { id: 'gray-spec-a', name: '规格甲', description: 'B = 7', family: 'gray', when: { eq: [{ field: 'b' }, 7] } };
   const rawB = { id: 'math-spec-b', name: '规格乙', description: 'G = 11', family: 'math', when: { eq: [{ field: 'g' }, 11] } };
 
-  it('数组 → kind=batch，逐条 parse；对象 → kind=single（旧行为）', () => {
+  it('数组 → kind=batch，逐条 parse；对象 → kind=single（旧行为）', async () => {
     const batchPath = join(repo.root, 'badges.json');
     writeFileSync(batchPath, JSON.stringify([rawA, rawB]), 'utf8');
     const batchArgs = parseAdminArgs(['add-badge', '--spec', batchPath]);
@@ -382,7 +382,7 @@ describe('批量接口：--spec 文件内容是数组即批量', () => {
     expect(single.kind).toBe('single');
   });
 
-  it('空数组被拒绝（批量至少要有一条）', () => {
+  it('空数组被拒绝（批量至少要有一条）', async () => {
     const emptyPath = join(repo.root, 'empty.json');
     writeFileSync(emptyPath, '[]', 'utf8');
     expect(() => buildSpecFromArgs(parseAdminArgs(['add-badge', '--spec', emptyPath]) as never)).toThrow(/空/);
@@ -394,7 +394,7 @@ describe('批量提交：作业文件存原始数组、并发仍被锁拒绝', (
     return () => ({ pid, unref: () => {}, on: () => {} });
   }
 
-  it('submits specs 数组，子进程能逐条重新 parse；第二次提交被 exit 6 拒绝', () => {
+  it('submits specs 数组，子进程能逐条重新 parse；第二次提交被 exit 6 拒绝', async () => {
     const rawSpecs = [
       { id: 'gray-job-a', name: '作业甲', description: 'B = 7', family: 'gray', when: { eq: [{ field: 'b' }, 7] } },
       { id: 'math-job-b', name: '作业乙', description: 'G = 11', family: 'math', when: { eq: [{ field: 'g' }, 11] } },
@@ -431,13 +431,13 @@ describe('批量提交：作业文件存原始数组、并发仍被锁拒绝', (
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('批量安全性质：全局平衡保留现场 / 脏工作区拒绝开跑', () => {
-  it('enumerate 全局平衡类失败 → 退出码 3、**保留现场**（不自动回滚整批）', () => {
+  it('enumerate 全局平衡类失败 → 退出码 3、**保留现场**（不自动回滚整批）', async () => {
     const specs = [
       makeSpec({ id: 'gray-bal-1', name: '平衡一', description: 'B = 7' }),
       makeSpec({ id: 'gray-bal-2', name: '平衡二', description: 'B = 11', when: { eq: [{ field: 'b' }, 11] } }),
       makeSpec({ id: 'gray-bal-3', name: '平衡三', description: 'B = 13', when: { eq: [{ field: 'b' }, 13] } }),
     ];
-    const outcome = runBatchPipeline(
+    const outcome = await runBatchPipeline(
       batchJob(specs),
       pipelineDeps(repo, { exec: createFakeExec(repo.root, { enumerate: 'global' }) }),
     );
@@ -450,12 +450,12 @@ describe('批量安全性质：全局平衡保留现场 / 脏工作区拒绝开�
     expect(outcome.snapshotPath).toBeDefined();
   });
 
-  it('受影响路径有未提交改动 → 退出码 7、零写盘、零快照', () => {
+  it('受影响路径有未提交改动 → 退出码 7、零写盘、零快照', async () => {
     const grayPath = rel('packages/shared/src/badges/gray.ts');
     const dirtyContent = `${readFileSync(grayPath, 'utf8')}\n// 别人未提交的改动\n`;
     writeFileSync(grayPath, dirtyContent, 'utf8');
 
-    const outcome = runBatchPipeline(
+    const outcome = await runBatchPipeline(
       batchJob([
         makeSpec({ id: 'gray-dirty-1', name: '脏一', description: 'B = 7' }),
         makeSpec({ id: 'gray-dirty-2', name: '脏二', description: 'B = 11', when: { eq: [{ field: 'b' }, 11] } }),

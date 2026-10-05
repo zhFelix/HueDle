@@ -183,7 +183,7 @@ describe('POST /badge/submit：提交（PRG）', () => {
           family: 'casino',
           mode: 'handwritten',
           check: 'onRanks(c)',
-          evalHelpers: '{"onRanks":"color => color.r === 0"}',
+          evalHelpers: '["onRanks"]',
         }).toString(),
       });
       expect(res.status).toBe(303);

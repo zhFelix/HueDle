@@ -12,7 +12,7 @@ import type { BadgeDef, ColorInfo } from '../types';
 import { isGray, isPalindromeNumber, isPowerOfTwo, isPrime, maxChannel, minChannel } from './helpers';
 
 // private：三通道极差（max − min），仅本文件内部使用
-const spread = (c: ColorInfo): number => maxChannel(c) - minChannel(c);
+export const spread = (c: ColorInfo): number => maxChannel(c) - minChannel(c);
 
 export const grayBadges: BadgeDef[] = [
   {

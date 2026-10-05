@@ -90,7 +90,7 @@ function makeSpec(overrides: Record<string, unknown>): BadgeSpec {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('测试 1（回归，最重要）：现有严格单色徽章喂给干跑必须通过', () => {
-  it('128 条里 hits: 1 的全部 26 条：没有任何 error 级 violation，只有单向警告', () => {
+  it('128 条里 hits: 1 的全部 26 条：没有任何 error 级 violation，只有单向警告', async () => {
     const existing = loadExistingChecks();
     const singles = existing.filter(item => item.hits === 1);
     // 钉住数据：这正是「越稀有的徽章越必然被更宽的徽章包含」的那一批。
@@ -129,7 +129,7 @@ describe('测试 1（回归，最重要）：现有严格单色徽章喂给干�
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('测试 2：extreme-404（严格 #404404）只有警告、无错误', () => {
-  it('hits = 1，与既有徽章的 13 处蕴含全部是 warning 级', () => {
+  it('hits = 1，与既有徽章的 13 处蕴含全部是 warning 级', async () => {
     const spec = parseBadgeSpec({
       id: 'extreme-404',
       name: '极四零四',
@@ -139,7 +139,7 @@ describe('测试 2：extreme-404（严格 #404404）只有警告、无错误', (
       when: { eq: [{ field: 'hex' }, '#404404'] },
     });
     // 真的把 spec 编译成谓词（不是手写一个 check 糊弄过去）。
-    const compiled = compileSpec(spec, REPO_ROOT);
+    const compiled = await compileSpec(spec, REPO_ROOT);
     const result = runDryRun({ check: compiled.predicate, existing: loadExistingChecks(), total: TOTAL_COLORS });
 
     expect(result.hits).toBe(1);
@@ -157,7 +157,7 @@ describe('测试 2：extreme-404（严格 #404404）只有警告、无错误', (
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('测试 3：互相蕴含（A ≡ B）仍然拒绝', () => {
-  it('两个不同 id、同一个 check → 干跑报 error（不是 warning）', () => {
+  it('两个不同 id、同一个 check → 干跑报 error（不是 warning）', async () => {
     const result = runBatchDryRun({
       candidates: [
         { id: 'gray-eq-a', group: null, check: (c: { b: number }) => c.b === 7 },
@@ -173,10 +173,10 @@ describe('测试 3：互相蕴含（A ≡ B）仍然拒绝', () => {
     expect(result.violations.join('\n')).toContain('双倍计分');
   });
 
-  it('管道层：两条等价 spec → refused、退出码 2、零写盘', () => {
+  it('管道层：两条等价 spec → refused、退出码 2、零写盘', async () => {
     const a = makeSpec({ id: 'gray-eq-pipe-a', name: '等价甲', description: 'B = 7' });
     const b = makeSpec({ id: 'gray-eq-pipe-b', name: '等价乙', description: 'B = 7' });
-    const outcome = runBatchPipeline(batchJob([a, b]), pipelineDeps(repo));
+    const outcome = await runBatchPipeline(batchJob([a, b]), pipelineDeps(repo));
     expect(outcome.exitCode).toBe(EXIT_ROLLED_BACK);
     expect(outcome.state).toBe('refused');
     expect(outcome.failureClass).toBe('dryrun');
@@ -189,7 +189,7 @@ describe('测试 3：互相蕴含（A ≡ B）仍然拒绝', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('测试 4：警告清单带方向 / 对方 id / 共命中数 / Jaccard', () => {
-  it('新 ⊆ 旧：warning 里有对端 id、cohits、jaccard，且文案写明不是错误', () => {
+  it('新 ⊆ 旧：warning 里有对端 id、cohits、jaccard，且文案写明不是错误', async () => {
     const result = runDryRun({
       check: c => c.b === 7,
       existing: [{ id: 'gray-broad', group: null, hits: 2048, check: c => c.b < 128 }],
@@ -214,10 +214,10 @@ describe('测试 4：警告清单带方向 / 对方 id / 共命中数 / Jaccard'
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('测试 5：只有警告时是【待确认】，不是失败；硬错误才是失败', () => {
-  it('单向蕴含 → state = awaiting_confirmation（图标 awaiting，不是 failed）', () => {
+  it('单向蕴含 → state = awaiting_confirmation（图标 awaiting，不是 failed）', async () => {
     const narrow = makeSpec({ id: 'gray-await-narrow', name: '窄幅', description: 'B = 7' });
     const wide = makeSpec({ id: 'gray-await-wide', name: '宽幅', description: 'B < 128', when: { lt: [{ field: 'b' }, 128] } });
-    const outcome = runBatchPipeline(batchJob([narrow, wide]), pipelineDeps(repo));
+    const outcome = await runBatchPipeline(batchJob([narrow, wide]), pipelineDeps(repo));
     expect(outcome.state).toBe('awaiting_confirmation');
     expect(outcome.exitCode).toBe(EXIT_AWAITING_CONFIRMATION);
     expect(outcome.failureClass).toBe('dryrun-warnings');
@@ -227,20 +227,20 @@ describe('测试 5：只有警告时是【待确认】，不是失败；硬错�
     expect(stateFromRaw('refused')).toBe('failed');
   });
 
-  it('硬错误（hits = 0）→ refused，仍然是失败', () => {
+  it('硬错误（hits = 0）→ refused，仍然是失败', async () => {
     const never = makeSpec({
       id: 'gray-await-never',
       name: '永不命中',
       description: 'B 同时等于 7 和 8',
       when: { all: [{ eq: [{ field: 'b' }, 7] }, { eq: [{ field: 'b' }, 8] }] },
     });
-    const outcome = runBatchPipeline(batchJob([never]), pipelineDeps(repo));
+    const outcome = await runBatchPipeline(batchJob([never]), pipelineDeps(repo));
     expect(outcome.state).toBe('refused');
     expect(outcome.exitCode).toBe(EXIT_ROLLED_BACK);
     expect(stateFromRaw('refused')).toBe('failed');
   });
 
-  it('待确认批次渲染：图标有别于失败、展开可见警告清单、有继续/修改两个按钮', () => {
+  it('待确认批次渲染：图标有别于失败、展开可见警告清单、有继续/修改两个按钮', async () => {
     const html = renderBatchTree(
       [
         {
@@ -282,7 +282,7 @@ describe('测试 5：只有警告时是【待确认】，不是失败；硬错�
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('测试 6：待确认时子进程已经退出（不是挂着等输入）', () => {
-  it('真起一个子进程跑 runChild：退出码 9、状态待确认、pid 不在、锁已释放', () => {
+  it('真起一个子进程跑 runChild：退出码 9、状态待确认、pid 不在、锁已释放', async () => {
     const paths = ensureOutDirs(repo.adminRoot);
     const runId = 'child-await-1';
     const jobPath = join(paths.jobsDir, `${runId}.json`);
@@ -303,7 +303,10 @@ describe('测试 6：待确认时子进程已经退出（不是挂着等输入�
     writeFileSync(
       wrapper,
       `import { runChild } from ${JSON.stringify(childUrl)};\n`
-      + 'process.exitCode = runChild(process.argv[2], process.argv[3], process.argv[4]);\n',
+      + 'runChild(process.argv[2], process.argv[3], process.argv[4]).then(\n'
+      + '  code => { process.exitCode = code; },\n'
+      + '  err => { console.error(err); process.exitCode = 1; },\n'
+      + ');\n',
       'utf8',
     );
     const result = spawnSync(
@@ -333,7 +336,7 @@ describe('测试 6：待确认时子进程已经退出（不是挂着等输入�
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('测试 7：确认绑定 spec 的内容哈希', () => {
-  it('哈希不匹配（确认后改了 spec）→ 作废、重新给警告；匹配才继续', () => {
+  it('哈希不匹配（确认后改了 spec）→ 作废、重新给警告；匹配才继续', async () => {
     const wide = makeSpec({ id: 'gray-hash-wide', name: '宽幅', description: 'B < 128', when: { lt: [{ field: 'b' }, 128] } });
     const hash = specContentHash([wide]);
 
@@ -342,7 +345,7 @@ describe('测试 7：确认绑定 spec 的内容哈希', () => {
     expect(specContentHash([modified])).not.toBe(hash);
 
     // 先跑「旧确认 + 改后的内容」：哈希对不上 → 确认作废、重新停在待确认。
-    const stale = runBatchPipeline(batchJob([modified], { runId: 'run-stale', acceptedSpecHash: hash }), pipelineDeps(repo));
+    const stale = await runBatchPipeline(batchJob([modified], { runId: 'run-stale', acceptedSpecHash: hash }), pipelineDeps(repo));
     expect(stale.state).toBe('awaiting_confirmation');
     expect(stale.exitCode).toBe(EXIT_AWAITING_CONFIRMATION);
     expect(stale.conclusion).toContain('不匹配');
@@ -353,7 +356,7 @@ describe('测试 7：确认绑定 spec 的内容哈希', () => {
     expect(readFileSync(join(repo.root, 'packages/shared/src/badges/gray.ts'), 'utf8')).not.toContain('gray-hash-wide');
 
     // 带上正确哈希 → 确认生效，继续往下跑完。
-    const accepted = runBatchPipeline(batchJob([modified], { runId: 'run-accepted', acceptedSpecHash: specContentHash([modified]) }), pipelineDeps(repo));
+    const accepted = await runBatchPipeline(batchJob([modified], { runId: 'run-accepted', acceptedSpecHash: specContentHash([modified]) }), pipelineDeps(repo));
     expect(accepted.state).toBe('succeeded');
     expect(accepted.evidence.join('\n')).toContain('已接受');
     expect(readFileSync(join(repo.root, 'packages/shared/src/badges/gray.ts'), 'utf8')).toContain('gray-hash-wide');
@@ -365,10 +368,10 @@ describe('测试 7：确认绑定 spec 的内容哈希', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('测试 8：「继续」真的接着跑（走完剩余阶段）', () => {
-  it('管道层：带正确哈希 → 走完写盘/枚举并成功', () => {
+  it('管道层：带正确哈希 → 走完写盘/枚举并成功', async () => {
     const wide = makeSpec({ id: 'gray-cont-wide', name: '宽幅', description: 'B < 128', when: { lt: [{ field: 'b' }, 128] } });
     const calls: string[] = [];
-    const outcome = runBatchPipeline(
+    const outcome = await runBatchPipeline(
       batchJob([wide], { runId: 'run-cont', acceptedSpecHash: specContentHash([wide]) }),
       pipelineDeps(repo, { exec: (cmd, opts) => { calls.push(cmd); return pipelineDeps(repo).exec(cmd, opts); } }),
     );
@@ -377,7 +380,7 @@ describe('测试 8：「继续」真的接着跑（走完剩余阶段）', () =>
     expect(readFileSync(join(repo.root, 'packages/shared/src/badges/gray.ts'), 'utf8')).toContain('gray-cont-wide');
   });
 
-  it('暂存层：continuePendingBatch 读回待确认作业，带上确认哈希、新起一次运行', () => {
+  it('暂存层：continuePendingBatch 读回待确认作业，带上确认哈希、新起一次运行', async () => {
     const paths = ensureOutDirs(repo.adminRoot);
     const rawSpec = {
       id: 'gray-cont-two',

@@ -36,8 +36,8 @@ export interface AddBadgeCommand {
   specPath: string | undefined;
   /** `--ts <表达式>`：手写路径的快捷方式（需同时给出 --id/--name/--description/--family）。 */
   ts: string | undefined;
-  /** `--helper-eval name=<js 源码>`：手写路径里 private helper 的**干跑求值副本**。 */
-  helperEvals: string[];
+  /** `--helper <name>`（可重复）：手写路径干跑要 import 的 private helper **名字**（不是实现）。 */
+  helpers: string[];
   id: string | undefined;
   name: string | undefined;
   description: string | undefined;
@@ -76,7 +76,7 @@ export const USAGE = `HueDle 本地管理工具
   tsx src/cli.ts add-badge --spec <file.json> [--force] [--no-wait]
   tsx src/cli.ts add-badge --spec <badges.json>   # 内容是数组 = 批量（一个事务，只跑一次枚举）
   tsx src/cli.ts add-badge --ts <expr> --id <id> --name <n> --description <d> --family <f>
-                           [--group <g>] [--helper-eval name=<src>]... [--force] [--no-wait]
+                           [--group <g>] [--helper <name>]... [--force] [--no-wait]
   tsx src/cli.ts add-badge --status
   tsx src/cli.ts rollback --snapshot <dir>
 
@@ -89,7 +89,7 @@ export const USAGE = `HueDle 本地管理工具
                     **内容是数组时 = 批量**：N 条一起提交，干跑/枚举/docs/supersession/test
                     对整批只跑一次；整批是一个事务（任意一条失败 → 全部回滚）。
   --ts <expr>       仅 add-badge：手写单表达式（可引用家族文件里已有的 private helper）
-  --helper-eval     仅 add-badge：\`name=<js 源码>\`，private helper 的**干跑求值副本**
+  --helper          仅 add-badge：可重复；手写路径干跑要 import 的 private helper 名字
   --id/--name/--description/--family/--group   仅 add-badge --ts：元数据
   --force           仅 add-badge：检出未跑完的管道时强制接管锁（默认拒绝并报告）
   --no-wait         仅 add-badge：提交后立即返回（管道在 detached 子进程里继续跑）
@@ -127,7 +127,7 @@ function parseAddBadgeCommand(rest: string[]): AddBadgeCommand {
       options: {
         spec: { type: 'string' },
         ts: { type: 'string' },
-        'helper-eval': { type: 'string', multiple: true, default: [] },
+        'helper': { type: 'string', multiple: true, default: [] },
         id: { type: 'string' },
         name: { type: 'string' },
         description: { type: 'string' },
@@ -154,7 +154,7 @@ function parseAddBadgeCommand(rest: string[]): AddBadgeCommand {
     command: 'add-badge',
     specPath: values.spec,
     ts: values.ts,
-    helperEvals: values['helper-eval'] ?? [],
+    helpers: values['helper'] ?? [],
     id: values.id,
     name: values.name,
     description: values.description,

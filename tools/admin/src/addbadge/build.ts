@@ -7,9 +7,15 @@
  * 两者必须**语义等价**，这由 `__tests__/addbadge.build.test.ts` 用固定采样证明
  * （对 `toSource()` 的产物做白名单标识符检查后 `new Function` 求值，与谓词逐色比对）。
  *
- * 手写路径同样在这里编译：表达式里的自由标识符只允许「白名单 + 作者提供的
- * `evalHelpers`」；求值用 `new Function`，参数名全部来自白名单，所以这是**安全的 eval**。
+ * 手写路径同样在这里编译：表达式里的自由标识符只允许「白名单 + 目标家族文件里
+ * `export` 出来的 private helper」；求值用 `new Function`，参数名全部来自白名单与
+ * 那份 import 结果，所以这是**安全的 eval**。
+ *
+ * **干跑用的是文件里的真品**：{@link loadFamilyHelpers} 用 `await import(fileURL)`
+ * 把目标家族文件加载进来，取出的就是仓库里那份实现。作者不再提供任何副本，
+ * 因此不存在「副本与真品漂移」这一失效模式。工具本身跑在 `tsx` 下，直接可加载 `.ts`。
  */
+import { pathToFileURL } from 'node:url';
 import * as SHARED from '@huedle/shared';
 import type { ColorInfo } from '@huedle/shared';
 import { HELPER_ARITY, HELPER_RETURN, SpecError, type Expr, type ExprType, type OpName } from './spec';
@@ -404,67 +410,102 @@ export function freeIdentifiers(source: string): string[] {
 }
 
 export interface HandwrittenDiagnosis {
-  /** 无法解析的标识符（既不是白名单，也不是作者提供的 evalHelpers）。 */
+  /** 无法解析的标识符（既不是白名单，也不是声明的 private helper 名字）。 */
   unknownIdentifiers: string[];
   /** 命中了拒绝表。 */
   deniedIdentifiers: string[];
-  /** 表达式里被引用、且由 `evalHelpers` 提供的名字（按其出现顺序）。 */
+  /** 表达式里被引用、且在名字列表里的 private helper（按其出现顺序）。 */
   usedEvalHelpers: string[];
 }
 
 /**
  * 静态诊断手写表达式。
  *
+ * `helperNames` 是**依赖名字列表**（`handwritten.evalHelpers`），只用来判断
+ * 「这个自由标识符是不是目标文件里的 private helper」——实现由调用方
+ * import 真品后交给 {@link compileHandwritten}。
+ *
  * **这不是安全边界**：`new Function` 的求值环境由白名单参数构成，但 JS 本身
  * 可以通过原型链做很多事。它存在的意义是「防呆 + 让干跑可执行」。
  */
 export function diagnoseHandwritten(
   check: string,
-  evalHelpers: Record<string, string> = {},
+  helperNames: readonly string[] = [],
 ): HandwrittenDiagnosis {
   const identifiers = freeIdentifiers(check);
   const denied = identifiers.filter(name => DENIED_IDENTIFIERS.includes(name));
   const allowed = new Set<string>([...BASE_HELPER_NAMES, ...EXTRA_ALLOWED_IDENTIFIERS]);
-  const helperNames = Object.keys(evalHelpers);
   const unknown = identifiers.filter(name => !allowed.has(name) && !helperNames.includes(name));
   const usedEvalHelpers = helperNames.filter(name => identifiers.includes(name));
   return { unknownIdentifiers: unknown, deniedIdentifiers: denied, usedEvalHelpers };
 }
 
-/** 用白名单参数把 `evalHelpers` 组成一个受限作用域，返回它们的实现。 */
-function materializeEvalHelpers(evalHelpers: Record<string, string>): Record<string, unknown> {
-  const names = Object.keys(evalHelpers);
+/**
+ * 从目标家族文件里 import 出**真品** private helper。
+ *
+ * - 工具本身跑在 `tsx` 下（子进程是 `tsx src/addbadge/child.ts`），
+ *   所以 `await import('<家族文件>.ts')` 直接可用，不需要 jiti / Bun；
+ * - **降级行为：报错中止，绝不静默退回任何副本。**
+ *   import 失败 / 名字不存在（或没 `export`）都抛 {@link SpecError}。
+ */
+export async function loadFamilyHelpers(
+  familyFilePath: string,
+  names: readonly string[],
+): Promise<Record<string, unknown>> {
   if (names.length === 0) return {};
-  const body = names.map(name => `const ${name} = (${evalHelpers[name]});`).join('\n');
-  // 形参只有白名单 helper 名；evalHelpers 之间可以互相引用（按声明顺序）。
-  const factory = new Function(...BASE_HELPER_NAMES, `"use strict";\n${body}\nreturn { ${names.join(', ')} };`);
-  const values = BASE_HELPER_NAMES.map(name => BASE_HELPERS[name]);
-  return factory(...values) as Record<string, unknown>;
+  let module: Record<string, unknown>;
+  try {
+    module = (await import(pathToFileURL(familyFilePath).href)) as Record<string, unknown>;
+  } catch (err) {
+    throw new SpecError(
+      `干跑无法 import 目标家族文件 ${familyFilePath}：${err instanceof Error ? err.message : String(err)}。`
+      + '干跑必须用文件里的真品 private helper 求值（不再接受作者提供的副本）；'
+      + '请确认该家族文件能被 tsx 正常加载。',
+      'handwritten.evalHelpers',
+    );
+  }
+  const missing = names.filter(name => typeof module[name] !== 'function');
+  if (missing.length > 0) {
+    throw new SpecError(
+      `目标家族文件里没有可用的 export：${missing.join(', ')}。`
+      + '被手写徽章引用的 private helper 必须加 `export`（只加 export，不改实现），'
+      + '干跑才能 import 到真品。',
+      'handwritten.evalHelpers',
+    );
+  }
+  const out: Record<string, unknown> = {};
+  for (const name of names) out[name] = module[name];
+  return out;
 }
 
 /**
  * 编译手写表达式成谓词。
  *
- * 参数顺序：`(c, ...白名单 helper, ...evalHelpers)` —— 全部来自白名单，
- * 所以没有任何位置可以注入 `process` / `require`。
+ * `helpers` 是 {@link loadFamilyHelpers} 从目标家族文件 import 出来的**真品实现**，
+ * 键必须与依赖名字列表一一对应。参数顺序：`(c, ...白名单 helper, ...真品 helper)`——
+ * 全部来自白名单与文件 import，没有任何位置可以注入 `process` / `require`。
  */
 export function compileHandwritten(
   check: string,
-  evalHelpers: Record<string, string> = {},
+  helpers: Readonly<Record<string, unknown>> = {},
 ): (c: ColorInfo) => unknown {
-  const diagnosis = diagnoseHandwritten(check, evalHelpers);
+  const helperNames = Object.keys(helpers);
+  const diagnosis = diagnoseHandwritten(check, helperNames);
   if (diagnosis.deniedIdentifiers.length > 0) {
     throw new SpecError(`手写表达式含有禁止的标识符：${diagnosis.deniedIdentifiers.join(', ')}`, 'handwritten.check');
   }
   if (diagnosis.unknownIdentifiers.length > 0) {
     throw new SpecError(
       `手写表达式引用了无法求值的标识符：${diagnosis.unknownIdentifiers.join(', ')}。`
-      + '它们既不是 helpers.ts 的成员，也没有在 evalHelpers 里给出等价实现（仅用于干跑求值）。',
+      + '它们既不是 helpers.ts 的成员，也没有被列入 handwritten.evalHelpers（依赖名字列表）。',
       'handwritten.check',
     );
   }
-  const helperValues = materializeEvalHelpers(evalHelpers);
-  const helperNames = Object.keys(evalHelpers);
+  for (const name of helperNames) {
+    if (typeof helpers[name] !== 'function') {
+      throw new SpecError(`evalHelpers 里的 "${name}" 不是函数——干跑只接受文件 import 出来的真品`, 'handwritten.evalHelpers');
+    }
+  }
   const fn = new Function(
     'c',
     ...BASE_HELPER_NAMES,
@@ -472,7 +513,7 @@ export function compileHandwritten(
     `"use strict"; return (${check});`,
   ) as (...args: unknown[]) => unknown;
   const values = BASE_HELPER_NAMES.map(name => BASE_HELPERS[name]);
-  const extra = helperNames.map(name => helperValues[name]);
+  const extra = helperNames.map(name => helpers[name]);
   return color => fn(color, ...values, ...extra);
 }
 

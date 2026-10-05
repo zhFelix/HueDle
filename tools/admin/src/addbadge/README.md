@@ -81,9 +81,11 @@ pnpm -C tools/admin run rollback  -- --snapshot <dir>  # 按快照手动回滚
 - **结构化**（`when`）：覆盖「单表达式且只用 `helpers.ts`」那部分（实测 128 条里 70 条）。
 - **手写**（`handwritten.check` / `--ts`）：27% 的形态（casino 顺子、pattern 结构）表达不了，
   必须能手写。手写路径不是逃生舱——没有它这个工具就是残的。
-  写盘前的干跑需要能执行这段逻辑，所以引用到的 private helper 要用 `evalHelpers` /
-  `--helper-eval` 提供一份**仅用于求值**的副本（不会写进仓库）；
-  它是否与文件里的实现逐字等价，**本工具无法证明**（见报告里的「不确定项」）。
+  写盘前的干跑需要能执行这段逻辑，于是**直接 `await import` 目标家族文件里的真品**求值
+  （工具本身跑在 `tsx` 下）。`evalHelpers` / `--helper` 只给**依赖名字列表**：
+  被引用的 private helper 必须是文件里带 `export` 的顶层 `const`。
+  副本不再存在，所以「干跑求值的东西」与「写进仓库的东西」必然是同一份实现。
+  降级一律报错中止：import 失败 / 名字不存在 / 求值抛异常，都不静默退回副本。
   语法/类型错误由写盘后的 `tsc --noEmit` 兜（它在 enumerate 之前）。
 
 ## 退出码

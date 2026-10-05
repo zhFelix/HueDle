@@ -151,15 +151,24 @@ export function importedHelperNames(content: string): string[] {
     .filter(Boolean);
 }
 
-/** 目标文件里是否存在 `const <name> =` 这样的顶层声明（手写路径引用 private helper 时用）。 */
+/**
+ * 目标文件里是否存在顶层 `const <name> =` 声明（手写路径引用 private helper 时用）。
+ *
+ * **允许前置 `export`**：干跑要从家族文件 import 真品，被引用的 private helper
+ * 必须 `export` 出来（形态仍是文件私有的 `const` 箭头函数，只是多一个关键字）。
+ */
 export function hasLocalDeclaration(content: string, name: string): boolean {
-  const pattern = new RegExp(`^\\s*const\\s+${escapeRegExp(name)}\\s*[:=]`, 'm');
+  const pattern = new RegExp(`^\\s*(?:export\\s+)?const\\s+${escapeRegExp(name)}\\s*[:=]`, 'm');
   return pattern.test(content);
 }
 
-/** 抽出某个 `const <name> = …;` 声明的源码文本（用于「干跑副本 vs 文件」的漂移提示）。 */
+/**
+ * 抽出某个 `const <name> = …;` 声明的源码文本（用于「干跑副本 vs 文件」的漂移提示）。
+ *
+ * 匹配范围包含可能存在的 `export ` 前缀——写盘后自检比较的就是这段完整声明文本。
+ */
 export function extractLocalDeclaration(content: string, name: string): string | undefined {
-  const pattern = new RegExp(`^([ \\t]*)const\\s+${escapeRegExp(name)}\\s*[:=]`, 'm');
+  const pattern = new RegExp(`^([ \\t]*)(?:export\\s+)?const\\s+${escapeRegExp(name)}\\s*[:=]`, 'm');
   const match = pattern.exec(content);
   if (!match) return undefined;
   const start = match.index;

@@ -21,7 +21,6 @@ import { METRICS } from '../stats';
 import {
   parseSelection,
   renderUiPage,
-  UI_NAV_LABELS,
   UI_OVERVIEW_ID,
   UI_OVERVIEW_LABEL,
   UI_WINDOWS,
@@ -78,7 +77,7 @@ describe('测试 1：左栏导航 = 概览 + M1–M8 共 9 项', () => {
     expect(sidebar).toContain(`<a class="nav-item" href="?days=30"`);
     for (const metric of METRICS) {
       expect(sidebar).toContain(`href="?days=30&m=${metric.id}"`);
-      expect(sidebar).toContain(escapeHtml(UI_NAV_LABELS[metric.id]));
+      expect(sidebar).toContain(escapeHtml(metric.navLabel));
     }
     expect(sidebar).toContain(escapeHtml(UI_OVERVIEW_LABEL));
   });
