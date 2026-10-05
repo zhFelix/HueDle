@@ -63,6 +63,18 @@ describe('allBadges 全局结构', () => {
     }
   });
 
+  // 集合相等断言：与上面第 3 条【方向不同】。
+  // 第 3 条是 def → pricing（定义驱动），所以「定价里有、定义里没有」的孤儿条目
+  // 永远不会被查到——2026-10-05 真的发生过（pricing.gen.ts 留下 'extreme-404'，
+  // 而徽章定义里没有它），当时四个套件全绿。
+  // 这条同时覆盖两个方向：定价有定义无（孤儿）、定义有定价无（缺数据）。
+  it('3b. PRICING 的 id 集合与徽章定义完全一致（集合相等，两个方向都查）', () => {
+    const badgeIds = allBadges.map(badge => badge.id).sort();
+    const pricingIds = Object.keys(PRICING).sort();
+    // 用数组而非 Set：toEqual 对数组的 diff 可读性更好，多出/缺少的 id 直接显示。
+    expect(pricingIds).toEqual(badgeIds);
+  });
+
   it('4. PRICING 里的 ep 必须精确等于 epFromHits(hits)（禁止取整漂移）', () => {
     // 取整会让分位表与实际分布失配——分位表是按未取整的 ep 统计的。
     for (const [id, pricing] of Object.entries(PRICING)) {
