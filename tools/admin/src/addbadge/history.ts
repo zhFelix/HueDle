@@ -87,3 +87,17 @@ export function recordBatchOutcome(
   next[index] = merged;
   writeBatches(adminRoot, next);
 }
+
+/**
+ * 删掉一条批次历史（**放弃待确认批次**时用）。
+ *
+ * 找不到对应记录时**一个字节都不写**，返回 `false`——删除必须是「确实删掉了」
+ * 才算成功，否则调用方会把「本来就没有」误报成「已删除」。
+ */
+export function removeBatchRecord(adminRoot: string, runId: string): boolean {
+  const records = readBatches(adminRoot);
+  const kept = records.filter(item => item.runId !== runId);
+  if (kept.length === records.length) return false;
+  writeBatches(adminRoot, kept);
+  return true;
+}

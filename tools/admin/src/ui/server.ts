@@ -40,6 +40,7 @@ import {
   type RunStagedOptions,
   type StagedDraft,
 } from '../addbadge/staging';
+import { discardBatch, type DiscardResult } from '../addbadge/discard';
 import { buildBatchTree, type TreeBatch } from '../addbadge/tree';
 import { addBadgePaths, readStatus, type StatusView } from '../addbadge/state';
 import { renderBadgePage, renderBadgeStatusJson, type BadgeFormValues } from './badge';
@@ -128,6 +129,11 @@ export interface UiBadgeOptions {
    * 幂等、不覆盖已有草稿）。默认 {@link restoreBatchDrafts}。
    */
   restoreDrafts?: (adminRoot: string, runId: string) => RestoreResult;
+  /**
+   * 「删除」：**放弃**一个【待确认】批次（从列表移除；冻结的 spec 一并删除）。
+   * 默认 {@link discardBatch}。测试可注入以断言 HTTP 层只负责转发。
+   */
+  discardBatch?: (adminRoot: string, runId: string) => DiscardResult;
   /** 树形列表模型；默认 {@link buildBatchTree}。 */
   readTree?: (adminRoot: string) => TreeBatch[];
   /**
@@ -538,6 +544,38 @@ async function handleBadgeModify(
   redirect(res, `/badge?modified=1${suffix}`);
 }
 
+/**
+ * `POST /badge/discard`：**放弃**一个【待确认】批次，把它从列表里彻底移除。
+ *
+ * 与「修改」的分工：想留着 spec 就点「修改」（放回暂存区），点了「删除」则连
+ * `jobs/<runId>.json` 里冻结的 spec 一起丢掉——按钮的 hover 文案写明了这一点。
+ * 守卫与动作都在 {@link discardBatch} 里；这里只转发 + 把结果翻译成跳转。
+ */
+async function handleBadgeDiscard(
+  badge: UiBadgeOptions,
+  token: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const fields = await readAuthorizedForm(token, req, res);
+  if (!fields) return;
+  const runId = fields.get('runId') ?? '';
+  const discard = badge.discardBatch ?? discardBatch;
+  let result: DiscardResult;
+  try {
+    result = discard(badge.adminRoot, runId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    redirect(res, `/badge?error=${encodeURIComponent(`放弃批次失败：${message}`)}`);
+    return;
+  }
+  if (!result.ok) {
+    redirect(res, `/badge?error=${encodeURIComponent(result.reason ?? '放弃批次失败')}`);
+    return;
+  }
+  redirect(res, `/badge?discarded=${encodeURIComponent(result.runId)}`);
+}
+
 /** 303：POST 之后回到表单页（PRG，避免刷新重复提交）。 */
 function redirect(res: ServerResponse, location: string): void {
   res.writeHead(303, {
@@ -587,6 +625,10 @@ async function handleRequest(
         await handleBadgeModify(options.badge, token, req, res);
         return;
       }
+      if (url.pathname === '/badge/discard') {
+        await handleBadgeDiscard(options.badge, token, req, res);
+        return;
+      }
     }
     send(
       res,
@@ -623,6 +665,7 @@ async function handleRequest(
     const restoredFrom = url.searchParams.get('from');
     const updated = url.searchParams.get('updated');
     const replacesMissing = url.searchParams.get('replacesMissing');
+    const discarded = url.searchParams.get('discarded');
 
     // `?edit=<draftId>`：把那条草稿载入表单（零 JS：预填全在服务端）。
     // 找不到时**不报错页**——回落成空白表单 + 一条说明，用户还能继续干活。
@@ -649,12 +692,15 @@ async function handleRequest(
               + (replacesMissing ? `原草稿 ${replacesMissing} 已不存在，这条改成了新增。` : '')
               : deleted
                 ? '已从暂存区删除。'
-                : modified
-                  ? restoredCount
-                    ? `已「修改」：把批次 ${restoredFrom ?? ''} 的 ${restoredCount} 条 spec 放回了暂存区`
-                      + '（不覆盖已有草稿、按 id 去重），可以接着改。仓库零改动、无快照。'
-                    : '已返回编辑状态：该批次没有可放回暂存区的 spec（作业文件不在或草稿都已在暂存区）。'
-                  : editMissing;
+                : discarded
+                  ? `已放弃待确认批次：${discarded}（从列表移除，冻结的 spec 一并删除）。`
+                    + '仓库零改动、无快照——那一批什么都没写进去。'
+                  : modified
+                    ? restoredCount
+                      ? `已「修改」：把批次 ${restoredFrom ?? ''} 的 ${restoredCount} 条 spec 放回了暂存区`
+                        + '（不覆盖已有草稿、按 id 去重），可以接着改。仓库零改动、无快照。'
+                      : '已返回编辑状态：该批次没有可放回暂存区的 spec（作业文件不在或草稿都已在暂存区）。'
+                    : editMissing;
     send(
       res,
       200,

@@ -300,6 +300,30 @@ export function readStatus(adminRoot: string): StatusView {
   return { status, interrupted, interruption, lock };
 }
 
+/**
+ * 删掉 `status.json`——**只当它确实指向 `runId` 时**才删（放弃待确认批次用）。
+ *
+ * 为什么必须核对 runId：状态文件是「最近一次运行」的单一落点，指向别的 runId 时
+ * 删它等于**替另一次运行抹掉现场**。读不出来（损坏）时也一律不删（fail-closed）。
+ * 返回是否真的删了。
+ */
+export function removeStatusIf(adminRoot: string, runId: string): boolean {
+  const paths = addBadgePaths(adminRoot);
+  if (!existsSync(paths.statusFile)) return false;
+  try {
+    const status = JSON.parse(readFileSync(paths.statusFile, 'utf8')) as PipelineStatus;
+    if (status.runId !== runId) return false;
+  } catch {
+    return false;
+  }
+  try {
+    unlinkSync(paths.statusFile);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** 供测试构造状态。 */
 export function makeStatus(partial: Partial<PipelineStatus> & { runId: string; spec: StatusSpec }): PipelineStatus {
   const now = new Date().toISOString();

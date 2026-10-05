@@ -99,7 +99,7 @@ function renderItems(batch: TreeBatch, token?: string): string {
 }
 
 /**
- * 「待确认」批次的**独立区块**：标题行（条数 + 继续/修改）+ 折叠的警告清单。
+ * 「待确认」批次的**独立区块**：标题行（条数 + 继续/修改/删除）+ 折叠的警告清单。
  *
  * 为什么从树里搬出来：状态卡显示的是**当前这次运行**，而待确认正是这次运行要你决定的
  * 事情，两者应当挨着（「待确认的批次放到日志下方」）。树里只留下历史批次的标题行，
@@ -107,12 +107,13 @@ function renderItems(batch: TreeBatch, token?: string): string {
  *
  * 版面要点（对应「[继续] [修改] 提到标题行上」）：
  *   - 标题行左侧是状态图标 + `待确认 · N 条单向蕴含警告`（不展开也知道有几条）；
- *   - 两个按钮放在同一个 `.awaiting-head` 容器里、靠右（`margin-left:auto`），
+ *   - 三个按钮放在同一个 `.awaiting-head` 容器里、靠右（`margin-left:auto`），
  *     因此再多条警告也不需要滚到末尾才够得到；
  *   - 警告清单折进一个**默认不展开**的 `<details>`：版面干净，明细随点随看。
  *
- * 警告文案**必须写清这不是错误**（否则用户会以为失败了）；两个按钮都是原生表单 POST，
- * 走与其它写端点完全相同的令牌检查。
+ * 警告文案**必须写清这不是错误**（否则用户会以为失败了）；三个按钮都是原生表单 POST，
+ * 走与其它写端点完全相同的令牌检查。「删除」是唯一不可逆的动作，因此按钮单独描红，
+ * 文案里点明「想保留 spec 请先点修改」。
  */
 function renderAwaitingBlock(batch: TreeBatch, token?: string): string {
   const warnings = batch.warnings ?? [];
@@ -146,11 +147,17 @@ ${hashInput}
 <input type="hidden" name="runId" value="${escapeHtml(batch.key)}">
 <button type="submit" class="btn-modify" title="把批次 ${escapeHtml(batch.key)} 的 spec 放回暂存区（按 id 去重，不覆盖已有草稿），接着编辑">修改</button>
 </form>
+<form method="post" action="/badge/discard">
+<input type="hidden" name="token" value="${escapeHtml(token ?? '')}">
+<input type="hidden" name="runId" value="${escapeHtml(batch.key)}">
+<button type="submit" class="btn-discard" title="放弃这一批：从列表移除，冻结的 spec 一并删除（仓库零改动）。想保留 spec 请先点「修改」">删除</button>
+</form>
 </span>
 </div>
 <p class="batch-awaiting-note"><strong>待确认</strong>：干跑没有任何硬错误，只有 ${warnings.length} 条<b>单向蕴含警告</b>。
 单向蕴含是徽章系统的固有性质（越稀有的徽章必然被更宽的徽章包含），<strong>它不阻止写入，也不是失败</strong>；
-工作区仍然零改动。点「继续」才写盘；点「修改」则把这一批的 spec <b>放回暂存区</b>，可以接着改。</p>
+工作区仍然零改动。点「继续」才写盘；点「修改」则把这一批的 spec <b>放回暂存区</b>，可以接着改；
+点「删除」则<b>放弃这一批</b>——从列表移除，冻结的 spec 一并删除（想留着就先点「修改」）。</p>
 <details class="awaiting-warnings">
 <summary>展开警告清单（${warnings.length} 条）</summary>
 ${list}

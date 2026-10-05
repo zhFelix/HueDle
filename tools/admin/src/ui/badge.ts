@@ -125,7 +125,7 @@ const BADGE_PAGE_JS = `(function () {
     } else if (s.state === 'running') {
       bar.textContent = '运行中…（本页只读状态文件，关掉浏览器不影响管道）';
     } else if (s.state === 'awaiting_confirmation') {
-      bar.textContent = '等待确认：有单向蕴含警告（这不是失败，工作区零改动）——点批次里的「继续」或「修改」';
+      bar.textContent = '等待确认：有单向蕴含警告（这不是失败，工作区零改动）——点批次里的「继续」「修改」或「删除」';
     } else {
       bar.textContent = '已结束：' + s.state;
     }
@@ -222,7 +222,7 @@ export function renderBadgePage(options: BadgePageOptions): string {
   .run-bar button { background: var(--amber-400); color: var(--ink-950); border: 0; border-radius: 9999px; padding: .4rem 1.2rem; font-weight: 700; cursor: pointer; }
   .run-bar button:disabled { background: var(--ink-800); color: var(--neutral-500); cursor: not-allowed; }
   .run-bar .mode-note { margin: .4rem 0 0; }
-  /* ── 待确认独立区块（状态卡正下方）：标题行带条数 + 继续/修改，警告清单折进 details ── */
+  /* ── 待确认独立区块（状态卡正下方）：标题行带条数 + 继续/修改/删除，警告清单折进 details ── */
   .awaiting-block { border-left: 3px solid var(--amber-400); padding: .5rem .7rem; background: var(--ink-950); border-radius: .4rem; }
   .awaiting-block + .awaiting-block { margin-top: .8rem; }
   .awaiting-head { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; }
@@ -233,6 +233,9 @@ export function renderBadgePage(options: BadgePageOptions): string {
   .awaiting-actions .btn-continue:hover { background: var(--amber-200); }
   .awaiting-actions .btn-modify { background: var(--ink-800); color: var(--neutral-200); border: 1px solid var(--ink-700); }
   .awaiting-actions .btn-modify:hover { color: var(--neutral-100); }
+  /* 「删除」是唯一不可逆的那个：描边用红，和「继续/修改」区分开。 */
+  .awaiting-actions .btn-discard { background: transparent; color: var(--neutral-400); border: 1px solid var(--ink-700); }
+  .awaiting-actions .btn-discard:hover { color: var(--red-300); border-color: var(--red-300); }
   .awaiting-warnings { margin-top: .4rem; }
   .awaiting-warnings > summary { cursor: pointer; color: var(--neutral-400); font-size: .78rem; }
   .awaiting-warnings > summary:hover { color: var(--neutral-200); }
@@ -314,7 +317,7 @@ ${editingNote}
 <b>琥珀 ! = 有单向蕴含警告待确认（这不是失败）</b>、红底白叉=失败；
 失败能归因到某一条时，只在那一条上加 ✕（hover 显示它自己的原因）。
 批次<strong>默认只显示标题行</strong>，点标题看明细。有一条<b>待确认</b>批次时，
-它的警告清单与「继续」「修改」在最上面的「待确认」区块里。
+它的警告清单与「继续」「修改」「删除」在最上面的「待确认」区块里。
 暂存区每条草稿带「编辑」（载入上方表单，改完「只保存」替换它）与「删除」。</p>
 <div id="batch-tree">
 ${renderBatchTree(tree, { token: options.token })}

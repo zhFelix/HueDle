@@ -2,7 +2,7 @@
  * 加徽章页的**版面**与两个操作缺口（四项改动）：
  *
  *   ① 「待确认」区块从树里搬出来，放到「当前状态」卡片（含 `日志 :` 行）正下方；
- *   ② [继续] [修改] 移到该区块的**标题行**上，且标题行显示警告条数；
+ *   ② [继续] [修改] [删除] 移到该区块的**标题行**上，且标题行显示警告条数；
  *   ③ 所有批次的 `<details>` 默认折叠（服务端不写 `open`，也不做展开状态持久化）；
  *   ④ 暂存区草稿可「编辑」：`?edit=<id>` 服务端预填表单 + 隐藏 `replaces`，
  *      提交时替换而不是追加。
@@ -101,6 +101,7 @@ describe('① 待确认块的位置：状态卡正下方，树里没有', () => 
     expect(tail).not.toContain('channel-all-1');
     expect(tail).not.toContain('action="/badge/continue"');
     expect(tail).not.toContain('action="/badge/modify"');
+    expect(tail).not.toContain('action="/badge/discard"');
   });
 
   it('没有待确认批次时，页面里连 #awaiting 区块都不出现', () => {
@@ -113,16 +114,18 @@ describe('① 待确认块的位置：状态卡正下方，树里没有', () => 
 // ② 标题行：条数 + [继续] [修改]
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('② [继续] [修改] 在标题行上，标题行显示警告条数', () => {
-  it('标题行同时含条数文案与两个按钮（同一个 awaiting-head 容器）', () => {
+describe('② [继续] [修改] [删除] 在标题行上，标题行显示警告条数', () => {
+  it('标题行同时含条数文案与三个按钮（同一个 awaiting-head 容器）', () => {
     const html = page([awaitingBatch(13)]);
     const head = html.match(/<div class="awaiting-head">([\s\S]*?)<\/div>/)?.[1] ?? '';
     expect(head).not.toBe('');
     expect(head).toContain('待确认 · 13 条单向蕴含警告');
     expect(head).toContain('action="/badge/continue"');
     expect(head).toContain('action="/badge/modify"');
+    expect(head).toContain('action="/badge/discard"');
     expect(head).toContain('class="btn-continue"');
     expect(head).toContain('class="btn-modify"');
+    expect(head).toContain('class="btn-discard"');
   });
 
   it('标题行的条数就是警告条数（0 / 1 / 13）', () => {
