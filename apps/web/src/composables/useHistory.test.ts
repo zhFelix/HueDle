@@ -38,6 +38,11 @@ function writeHistory(raw: unknown): void {
   localStorage.setItem(STORAGE_KEYS.history, typeof raw === 'string' ? raw : JSON.stringify(raw));
 }
 
+/** 等一轮宏任务，让登录模式冷启动那次 `GET /api/history` 落地（构造时已发起、未 await）。 */
+function flush(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
 describe('useHistory', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -76,6 +81,36 @@ describe('useHistory', () => {
     expect(stats.value.byRarity.trash).toBe(2);
     expect(stats.value.byRarity.epic).toBe(1);
     expect(stats.value.byRarity.mythic).toBe(0); // 缺档补 0，仍可读
+  });
+
+  // ── ②a 总 CP：求和口径只有 computeHistoryStats 一处 ────────────────────
+  it('总 CP = 所有条目 cp 之和（与 computeHistoryStats 唯一实现对拍，精确到个位）', () => {
+    saveTodayResult(DAY('2026-03-04', { cp: 120, rarity: 'trash' }));
+    saveTodayResult(DAY('2026-03-05', { cp: 9_500, rarity: 'epic' }));
+    saveTodayResult(DAY('2026-03-06', { cp: 33, rarity: 'trash' }));
+
+    const { stats, entries } = useHistory();
+
+    expect(stats.value.totalCp).toBe(9_653); // 120 + 9500 + 33，不是 bestCp、不是天数
+    // 页面若另起一套求和就会偏离这个唯一实现
+    expect(stats.value.totalCp).toBe(computeHistoryStats(entries.value).totalCp);
+  });
+
+  it('总 CP：恰好一条记录时等于该条 cp；空历史为 0，绝不是 NaN / undefined', () => {
+    saveTodayResult(DAY('2026-03-04', { cp: 1_790_000_000, rarity: 'mythic' }));
+    expect(useHistory().stats.value.totalCp).toBe(1_790_000_000); // 大数不丢精度
+
+    localStorage.clear();
+    const empty = computeHistoryStats([]).totalCp;
+    expect(empty).toBe(0);
+    expect(Number.isNaN(empty)).toBe(false);
+    expect(empty).not.toBeUndefined();
+
+    const { stats, isEmpty } = useHistory();
+    expect(isEmpty.value).toBe(true);
+    expect(stats.value.totalCp).toBe(0);
+    expect(Number.isNaN(stats.value.totalCp)).toBe(false);
+    expect(stats.value.totalCp).not.toBeUndefined();
   });
 
   it('reload()：外部写入后能重新读到（并保持降序）', () => {
@@ -151,6 +186,7 @@ describe('useHistory', () => {
     expect(history.entries.value).toEqual([]);
     expect(history.stats.value.totalDays).toBe(0);
     expect(history.stats.value.bestEntry).toBeNull();
+    expect(history.stats.value.totalCp).toBe(0); // 清空后总 CP 归零，不是 NaN
 
     // 身份与登录态原封不动，记录类 key 清空
     expect(localStorage.getItem(STORAGE_KEYS.anonymousId)).toBe('anon-123');
@@ -181,6 +217,7 @@ describe('useHistory', () => {
     expect(dirty.entries.value.map(entry => entry.date)).toEqual(['2026-03-07', '2026-03-04']);
     expect(dirty.stats.value.totalDays).toBe(2);
     expect(dirty.stats.value.bestCp).toBe(42);
+    expect(dirty.stats.value.totalCp).toBe(49); // 只累加两条有效记录：7 + 42
     expect(dirty.stats.value.bestEntry?.date).toBe('2026-03-07');
     expect(dirty.stats.value.byRarity.trash).toBe(1);
     expect(dirty.stats.value.byRarity.epic).toBe(1);
@@ -253,6 +290,32 @@ describe('useHistory — 登录模式', () => {
     expect(remote.entries.value).toEqual(local.entries.value);
     expect(remote.stats.value).toEqual(localStats);
     expect(remote.stats.value).toEqual(computeHistoryStats(items, anchor));
+  });
+
+  it('总 CP 双模式一致：本地模式与登录模式（mock /api/history）同一批数据 → 同一个总 CP', async () => {
+    const anchor = new Date('2026-03-06T12:00:00Z');
+    const items = [
+      DAY('2026-03-06', { cp: 33, rarity: 'trash' }),
+      DAY('2026-03-05', { cp: 9_500, rarity: 'epic' }),
+      DAY('2026-03-04', { cp: 120, rarity: 'trash' }),
+    ];
+    for (const item of items) saveTodayResult(item);
+
+    // ① 本地模式（未登录）
+    const local = useHistory({ date: anchor });
+    expect(local.stats.value.totalCp).toBe(9_653);
+
+    // ② 登录模式：同一批数据由服务端返回
+    const { countOf } = installFetchMock(() => ({ body: items }));
+    loginAs();
+    const remote = useHistory({ date: anchor }); // 构造即冷启动，走服务端分支
+    await flush();
+
+    expect(countOf('/api/history')).toBe(1); // 确实走的是服务端那条分支，不是本地缓存
+    expect(remote.isLoggedIn.value).toBe(true);
+    expect(remote.stats.value.totalCp).toBe(local.stats.value.totalCp);
+    expect(remote.stats.value.totalCp).toBe(9_653);
+    expect(remote.stats.value.totalCp).toBe(computeHistoryStats(items, anchor).totalCp);
   });
 
   it('401 → 清 session、回退本地模式，并读回本地历史', async () => {

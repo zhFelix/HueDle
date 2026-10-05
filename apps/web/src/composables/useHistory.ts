@@ -19,7 +19,7 @@
  * `useDailyColor` 连带清掉它**（见 `lib/storage.ts` 的耦合说明）。
  * 忘记这个耦合就会出现「我明明抽了今天的，历史页却没有」。
  *
- * 统计口径（`totalDays` / `streak` / `bestCp` / `byRarity`）由**同一个**
+ * 统计口径（`totalDays` / `streak` / `bestCp` / `totalCp` / `byRarity`）由**同一个**
  * {@link computeHistoryStats} 计算，两种模式只换数据源，不换算法。
  *
  * 日期一律 UTC 口径：连续天数锚在 `utcDate()` 上（与 `loadStreak()` / 今日页一致）。
@@ -46,6 +46,8 @@ export interface HistoryStats {
   streak: number;
   /** 最高单日 CP。 */
   bestCp: number;
+  /** 总 CP：历史里**所有**条目 `cp` 之和；空历史为 0（不是 NaN / undefined）。 */
+  totalCp: number;
   /** 最高单日 CP 的那条记录；无记录时为 `null`。 */
   bestEntry: HistoryItem | null;
   /** 各档天数。**7 档全有键**（含 `trash`），没有的补 0。 */
@@ -63,8 +65,11 @@ export function computeHistoryStats(entries: HistoryItem[], date?: Date): Histor
   ) as Record<ScoreRarity, number>;
 
   let bestEntry: HistoryItem | null = null;
+  // 总 CP 从 0 起累加：空历史天然是 0，不会出现 NaN / undefined。
+  let totalCp = 0;
   for (const entry of entries) {
     byRarity[entry.rarity] += 1;
+    totalCp += entry.cp;
     if (bestEntry === null || entry.cp > bestEntry.cp) bestEntry = entry;
   }
 
@@ -72,6 +77,7 @@ export function computeHistoryStats(entries: HistoryItem[], date?: Date): Histor
     totalDays: entries.length,
     streak: computeStreak(entries, utcDate(date)),
     bestCp: bestEntry?.cp ?? 0,
+    totalCp,
     bestEntry,
     byRarity,
   };

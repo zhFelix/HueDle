@@ -11,7 +11,8 @@
  *      并说明两种模式抽到的是**不同的颜色**（DESIGN 第 11.5 节），这是玩家最容易
  *      困惑的点：本地抽了今天再登录，看到的是账户身份的今日颜色，不是"多抽了一次"。
  *   ② 统计区——主指标是**收集天数**（原来的「已记录天数」）；次要指标是**当前连续
- *      与最长连续并列**、最高 CP（含那天的日期）与稀有度分布。首页那个「连续天数」
+ *      与最长连续并列**、最高 CP（含那天的日期）、**总 CP**（历史里所有条目 `cp` 之和）
+ *      与稀有度分布。首页那个「连续天数」
  *      已经从首页移除，累计天数只在这里出现。
  *      为什么两个连续都要显示：成就里的连续类（三连 / 七日不辍）用的是**最长**连续
  *      （闩锁语义，见 `lib/achievements.ts`），只看「当前连续」会出现「当前 0 天，
@@ -178,7 +179,7 @@ function confirmClear(): void {
                 {{ longest }}<span class="ml-1 text-sm text-neutral-500">天</span>
               </dd>
             </div>
-            <div>
+            <div data-testid="best-cp">
               <dt class="text-xs uppercase tracking-widest text-neutral-500">最高 CP</dt>
               <dd class="mt-1 font-mono text-xl text-neutral-100">
                 {{ formatCp(stats.bestCp) }}
@@ -186,6 +187,13 @@ function confirmClear(): void {
               <p v-if="stats.bestEntry" class="mt-1 font-mono text-xs text-neutral-500">
                 {{ stats.bestEntry.date }}
               </p>
+            </div>
+            <!-- 总 CP：与其它统计项同格式（formatCp 千位分隔）；空历史由 stats 保证是 0。 -->
+            <div data-testid="total-cp">
+              <dt class="text-xs uppercase tracking-widest text-neutral-500">总 CP</dt>
+              <dd class="mt-1 font-mono text-xl text-neutral-100">
+                {{ formatCp(stats.totalCp) }}
+              </dd>
             </div>
           </dl>
         </div>

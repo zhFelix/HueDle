@@ -22,6 +22,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { createApp, nextTick, type App } from 'vue';
 import { createMemoryHistory, createRouter, type Router } from 'vue-router';
 import { ACHIEVEMENTS } from '../lib/achievements';
+import { formatCp } from '../lib/format';
 import { saveTodayResult, type HistoryItem } from '../lib/storage';
 import { installFetchMock } from '../test-utils/mock-fetch';
 import { useSessionStore } from '../stores/session';
@@ -191,5 +192,65 @@ describe('Profile 集成：单一历史数据源（登录模式）', () => {
     expect(
       root.querySelector<HTMLElement>('[data-testid="timeline-day"]')?.getAttribute('title'),
     ).toBe('2020-01-01 · #555555');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 总 CP：**算出来了还要真的接上页面**。
+// 「`computeHistoryStats` 里有 totalCp，但 Profile.vue 忘了渲染 / 渲染成别的字段」
+// 是这类改动最常见的集成失误，只有挂载整页读 DOM 才能发现。
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Profile 集成：总 CP 显示在统计区', () => {
+  it('渲染出 sum(cp)，走 formatCp 千位分隔，且与页面上其它 CP 同格式', async () => {
+    saveTodayResult(DAY('2020-01-01', { cp: 1_234_567 }));
+    saveTodayResult(DAY('2020-01-02', { cp: 2_000 }));
+    saveTodayResult(DAY('2020-01-03', { cp: 33 }));
+
+    const root = await mountProfile();
+
+    // ★ 页面真的渲染了这个值（1_234_567 + 2_000 + 33 = 1_236_600）
+    const total = statText(root, 'total-cp');
+    expect(total).toBe(`总CP${formatCp(1_236_600)}`);
+    expect(total).toContain('1,236,600');
+    expect(total).toMatch(/,\d{3}/); // 千位分隔符在，没有被压成 1236600 / 1.2e6 / log
+
+    // 与「最高 CP」逐字符同格式（都来自 formatCp），证明没有为总 CP 另立一套格式化
+    const best = (root.querySelector('[data-testid="best-cp"] dd')?.textContent ?? '').trim();
+    expect(best).toBe(formatCp(1_234_567));
+    expect(best).toContain('1,234,567');
+
+    // 排版与其它统计项一致：小标签 + 等宽大数字
+    expect(root.querySelector('[data-testid="total-cp"] dt')?.textContent).toBe('总 CP');
+    expect(root.querySelector('[data-testid="total-cp"] dd')?.className).toContain('font-mono');
+  });
+
+  it('统计区五项并列，且总 CP 与最高 CP 都在 stats-section 里', async () => {
+    for (const day of OLD_3_DAYS) saveTodayResult(day);
+
+    const root = await mountProfile();
+    const stats = root.querySelector('[data-testid="stats-section"]');
+
+    // 五项：收集天数（主指标）+ 当前连续 / 最长连续 / 最高 CP / 总 CP
+    expect(stats?.textContent).toContain('收集天数');
+    expect(statText(root, 'streak-current')).toBe('当前连续0天');
+    expect(statText(root, 'streak-longest')).toBe('最长连续3天');
+    expect(stats?.querySelector('[data-testid="best-cp"]')).not.toBeNull();
+    expect(stats?.querySelector('[data-testid="total-cp"]')).not.toBeNull();
+
+    // 窄屏不挤：次要指标容器允许换行（flex-wrap），且分隔用纵向 gap
+    const list = root.querySelector('[data-testid="best-cp"]')?.parentElement;
+    expect(list?.className).toContain('flex-wrap');
+  });
+
+  it('空历史：统计区不渲染，页面文本里没有 NaN / undefined', async () => {
+    const root = await mountProfile();
+
+    // stats-section 由 v-if="!isEmpty" 控制：空态下不显示统计区，
+    // 因此也不可能显示 "0" 之外的坏值（totalCp 的 0 语义由 useHistory 单测钉住）。
+    expect(root.querySelector('[data-testid="stats-section"]')).toBeNull();
+    expect(root.querySelector('[data-testid="total-cp"]')).toBeNull();
+    expect(root.textContent).not.toContain('NaN');
+    expect(root.textContent).not.toContain('undefined');
   });
 });
