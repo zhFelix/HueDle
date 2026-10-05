@@ -6,31 +6,69 @@
  *      **没有构建步骤**（`tsx` 直接跑），也就没有"前端产物"需要维护；
  *   2. 交互用浏览器原生能力实现，而不是 JS：
  *      - 换窗口 = `<a href="?days=7">` 重新请求（服务端重算，口径永远只有一份）；
- *      - 展开长表格 = `<details>/<summary>`；
- *      - 按指标跳转 = `#M1…M8` 锚点。
+ *      - 换指标 = `<a href="?days=30&m=M3">`，服务端**只渲染被选中的那一项**；
+ *      - 展开长表格 = `<details>/<summary>`。
  *      于是页面里**没有任何 `<script>`、没有任何外部资源**，断网也能用（硬约束⑥/测试 6）；
  *   3. 每个数字都来自 {@link StatsReport}，本文件不碰数据库——只读通道因此只有一条。
  *
- * 版面（本次改动的全部范围，只动表现层）：
- *   - 顶部「概览区」：抽取数 / 玩家数 / 新用户 / 一次性用户占比，四个大数字；
- *   - M1–M8 每张指标一张**卡片**（标题 + 它回答什么问题 + 表格 + 注），卡片之间有间隔；
+ * 版面（控制台式：顶栏 + 左导航 + 右详情；**只借结构，配色仍是原来的深色 + 琥珀**）：
+ *   - 顶栏 `.topbar`：标题、一行连接信息、7/30/90 天窗口切换、手动刷新；
+ *   - 左栏 `nav.sidebar`：「概览」+ 报告里实际存在的 M1–M8，当前项 `aria-current="page"` 高亮；
+ *   - 右栏 `main.panel`：**只有**选中的那一项（概览 或 某一个指标），
+ *     形如「标题 + 问：… + 表格 + 注」，不再把八张卡片堆在一起。
  *   - 长表格沿用 `<details>` 默认折叠（前 N 行可见，其余折起）。
  *   概览里的"新用户 / 一次性用户占比"不是新的查询口径，而是对已经查回来的
  *   M2 / M3 两张表的**展示层合计**（见 {@link sumColumn}）——避免为了好看在多处再写一遍 SQL。
  *
+ * 选中项的 URL 形态就是 `?days=<n>&m=<id>`；`m` 缺失或不是有效指标 id 时**静默回落概览**
+ * （见 {@link parseSelection}），不 400、不报错、不把原始输入回显到页面上。
+ *
  * 用户名（PII）：只有当 `report.namesRequested` 为真（`--include-names`）才渲染，
- * 且只渲染在**这个页面**里；本服务不写任何文件，所以 PII 不会落盘。
+ * 且只渲染在**这个页面**的概览里；本服务不写任何文件，所以 PII 不会落盘。
  */
 import type { StatsReport, SectionResult } from '../report';
 import type { Table } from '../analyze';
 import { fmtInt, fmtShare } from '../analyze';
 import { escapeHtml } from '../render/html';
+import type { MetricId } from '../stats';
 
 /** 可切换的时间窗口（至少 7 / 30 / 90）。 */
 export const UI_WINDOWS: readonly number[] = [7, 30, 90];
 
 /** 表格默认显示多少行；超出部分折进 `<details>`。 */
 export const UI_ROW_LIMIT = 10;
+
+/**
+ * 左栏第一项（也是"没有选中任何指标"时右侧渲染的东西）的 id。
+ *
+ * 它同时是 `?m=` 的一个合法取值：`?m=overview` 与省略 `m` 等价。
+ */
+export const UI_OVERVIEW_ID = 'overview';
+
+/**
+ * 左栏每一项的**短名**（完整标题太长、只出现在右栏的 `<h2>` 里）。
+ *
+ * 为什么单独一份而不是直接抄 `section.title`：左栏是导航，标题是详情；
+ * 而且这样一来「右侧只渲染选中的那一项」可以被严格断言——未选中指标的
+ * **完整标题**在整页里一个字都不出现（短名不会等于任何一条完整标题）。
+ */
+export const UI_NAV_LABELS: Readonly<Record<MetricId, string>> = {
+  M1: '抽取量与唯一约束',
+  M2: '新增与回访',
+  M3: '沉默分桶与一次性',
+  M4: '徽章命中率',
+  M5: '幽灵徽章 id',
+  M6: '稀有度漂移',
+  M7: 'cp 分布',
+  M8: '完整性哨兵',
+};
+
+/** 概览项在左栏里的短名。 */
+export const UI_OVERVIEW_LABEL = '窗口总览';
+
+/** 概览项回答什么问题（与 M1–M8 一样，概览也必须说清它回答什么）。 */
+export const UI_OVERVIEW_QUESTION =
+  '窗口内还有多少人在用、增长从哪里来、留存是不是真问题——先看这四个数，再进左边的 M1–M8 看细节。';
 
 /**
  * 哨兵单元格的状态类名（**表意**，不是装饰）。
@@ -103,11 +141,12 @@ export const UI_OVERVIEW_LABELS: readonly string[] = [
  *
  * 为什么手写而不是用 Tailwind：本工具是"一段 HTML 字符串 + 零构建步骤"（`tsx` 直接跑），
  * 用不了 `@tailwindcss/vite`。所以下面每一个色值都是**逐字抄**自主题定义：
- *   - `--ink-*`   ← `apps/web/src/style.css` 的 `@theme` 块；
+ *   - `--ink-*`   ← `apps/web/src/style.css` 的 `@theme` 块（本次重做控制台版面时原样保留，
+ *     没有照搬参考对象的浅色蓝）；
  *   - 其余色阶    ← Tailwind v4 默认主题 `tailwindcss/theme.css`（v4 用 oklch 定义，
  *     这里原样保留 oklch，不做近似换算，避免"看着像"而不是"就是那个值"）。
  * 观感照 `apps/web/src/pages/Profile.vue` / `components/*.vue`：
- *   页面底色 ink-950 → 卡片 ink-900 + 1px ink-700 边框 + 1rem 圆角；
+ *   页面底色 ink-950 → 顶栏/卡片 ink-900 + 1px ink-700 边框 + 1rem 圆角；
  *   正文 neutral-200，次要文字 neutral-400/500，强调与可点击元素 amber-300/400。
  */
 export const UI_CSS = `
@@ -138,24 +177,44 @@ export const UI_CSS = `
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0 auto; max-width: 74rem; padding: 1.5rem 1rem 4rem; line-height: 1.55;
+    margin: 0; line-height: 1.55;
     background: var(--ink-950); color: var(--neutral-200);
     font-family: var(--font-sans); -webkit-font-smoothing: antialiased;
   }
-  h1 { font-family: var(--font-mono); font-size: 1.5rem; font-weight: 700; letter-spacing: -.01em; color: var(--neutral-50); margin: 0 0 .35rem; }
+  h1 { font-family: var(--font-mono); font-size: 1.15rem; font-weight: 700; letter-spacing: -.01em; color: var(--neutral-50); margin: 0 0 .15rem; }
   h2 { font-size: 1rem; font-weight: 600; color: var(--neutral-100); margin: 0 0 .25rem; }
   a { color: var(--amber-300); text-decoration: none; }
   a:hover { color: var(--amber-200); text-decoration: underline; text-underline-offset: 4px; }
-  nav { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .7rem; padding: .7rem 0; border-bottom: 1px solid var(--ink-800); margin-bottom: 1rem; color: var(--neutral-500); font-size: .8rem; }
+
+  /* 顶栏：标题 + 连接信息在左，窗口切换与刷新在右（控制台式，但仍是深色琥珀）。 */
+  .topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem 1rem; padding: .8rem 1.25rem; background: var(--ink-900); border-bottom: 1px solid var(--ink-700); }
+  .brand { min-width: 0; }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .8rem; }
   /* 窗口切换：照 Profile.vue 的「登录 / 注册」胶囊（amber-400 边框 + amber-300 文字） */
-  nav a { border: 1px solid oklch(82.8% 0.189 84.429 / .5); background: oklch(82.8% 0.189 84.429 / .15); color: var(--amber-300); border-radius: 9999px; padding: .15rem .7rem; font-size: .75rem; font-weight: 600; }
-  nav a:hover { background: oklch(82.8% 0.189 84.429 / .25); color: var(--amber-200); text-decoration: none; }
-  nav a[aria-current="page"] { background: var(--amber-400); border-color: var(--amber-400); color: var(--ink-950); }
-  /* 指标锚点：低调的 ink 描边胶囊，不与窗口切换抢注意力 */
-  .metrics { border-bottom: none; }
-  .metrics a { border: 1px solid var(--ink-700); background: none; color: var(--neutral-300); border-radius: 9999px; padding: .1rem .6rem; font-family: var(--font-mono); font-weight: 500; }
-  .metrics a:hover { background: var(--ink-800); border-color: var(--ink-700); color: var(--neutral-100); text-decoration: none; }
-  section { margin-top: 1.5rem; scroll-margin-top: 1rem; }
+  nav.windows { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; color: var(--neutral-500); font-size: .8rem; }
+  nav.windows a { border: 1px solid oklch(82.8% 0.189 84.429 / .5); background: oklch(82.8% 0.189 84.429 / .15); color: var(--amber-300); border-radius: 9999px; padding: .15rem .7rem; font-size: .75rem; font-weight: 600; }
+  nav.windows a:hover { background: oklch(82.8% 0.189 84.429 / .25); color: var(--amber-200); text-decoration: none; }
+  nav.windows a[aria-current="page"] { background: var(--amber-400); border-color: var(--amber-400); color: var(--ink-950); }
+  a.refresh { border: 1px solid var(--ink-700); background: var(--ink-800); color: var(--neutral-100); border-radius: 9999px; padding: .15rem .8rem; font-size: .75rem; font-weight: 600; }
+  a.refresh:hover { border-color: var(--amber-400); color: var(--amber-200); text-decoration: none; }
+  .bar-note { padding: .5rem 1.25rem 0; }
+
+  /* 两栏：左导航（概览 + M1–M8）+ 右详情（只渲染选中的那一项）。 */
+  .layout { display: grid; grid-template-columns: 15rem minmax(0, 1fr); align-items: start; }
+  .sidebar { display: flex; flex-direction: column; gap: .15rem; padding: 1rem .75rem 2rem; border-right: 1px solid var(--ink-800); }
+  .nav-item { display: flex; align-items: baseline; gap: .55rem; padding: .5rem .7rem; border-radius: .6rem; border-left: 2px solid transparent; color: var(--neutral-300); }
+  .nav-item:hover { background: var(--ink-800); color: var(--neutral-100); text-decoration: none; }
+  .nav-item[aria-current="page"] { background: oklch(82.8% 0.189 84.429 / .14); border-left-color: var(--amber-400); color: var(--amber-200); }
+  .nav-id { font-family: var(--font-mono); font-size: .82rem; font-weight: 600; }
+  .nav-label { font-size: .75rem; color: var(--neutral-500); }
+  .nav-item[aria-current="page"] .nav-label { color: var(--neutral-300); }
+  .panel { min-width: 0; padding: 1.25rem 1.5rem 3rem; }
+
+  /* 详情卡片：圆角 + ink-700 边框 + ink-900 底，比页面底色 ink-950 高一层。 */
+  main section.card { margin: 0; border: 1px solid var(--ink-700); border-radius: 1rem; padding: 1rem 1.1rem 1.1rem; background: var(--ink-900); }
+  .card h2 { border-bottom: 1px solid var(--ink-800); padding-bottom: .45rem; }
+  .question { color: var(--neutral-400); font-size: .8rem; margin: .45rem 0 .5rem; }
+
   table { border-collapse: collapse; width: 100%; margin: .5rem 0; font-size: .85rem; font-family: var(--font-mono); }
   th, td { border: 1px solid var(--ink-700); padding: .25rem .6rem; text-align: left; }
   th { background: var(--ink-800); color: var(--neutral-300); font-weight: 600; font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; }
@@ -171,21 +230,31 @@ export const UI_CSS = `
   .meta, .note, .caption { color: var(--neutral-400); font-size: .8rem; margin: .25rem 0; }
   /* 「没有结论」= 中性：只借用中性灰，绝不借 warning/error 的任何色值 */
   .${NEUTRAL_NOTE_CLASS} { color: var(--neutral-400); }
-  .warning { color: var(--red-300); border: 1px solid oklch(39.6% 0.141 25.723 / .6); background: oklch(25.8% 0.092 26.042 / .4); border-radius: .75rem; padding: .45rem .75rem; font-size: .85rem; margin: .5rem 0; }
-  .names { border-left: 3px solid oklch(82.8% 0.189 84.429 / .6); padding-left: .75rem; }
+  .warning { color: var(--red-300); border: 1px solid oklch(39.6% 0.141 25.723 / .6); background: oklch(25.8% 0.092 26.042 / .4); border-radius: .75rem; padding: .45rem .75rem; font-size: .85rem; margin: .5rem 1.25rem; }
+  .names { border-left: 3px solid oklch(82.8% 0.189 84.429 / .6); padding-left: .75rem; margin-top: 1.25rem; }
+  .page-foot { padding: 0 1.25rem 2rem; }
 
   /* 概览区：大数字 + 小标签 + 辅助说明（层级感取自 Profile.vue 的统计区）。 */
-  .overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .75rem; margin: 1.25rem 0 1.75rem; }
+  .overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .75rem; margin: .75rem 0 0; }
   .stat { margin: 0; border: 1px solid var(--ink-700); border-radius: 1rem; padding: .9rem 1.05rem 1rem; background: var(--ink-900); }
   .stat figcaption { color: var(--neutral-500); font-size: .72rem; text-transform: uppercase; letter-spacing: .1em; }
   .stat-value { font-family: var(--font-mono); font-size: 2.25rem; font-weight: 700; line-height: 1.15; margin: .35rem 0 .2rem; color: var(--neutral-50); font-variant-numeric: tabular-nums; }
   .stat-note { color: var(--neutral-500); font-size: .72rem; margin: 0; }
 
-  /* 指标卡片：圆角 + ink-700 边框 + ink-900 底，比页面底色 ink-950 高一层。 */
-  main { margin-top: 1.5rem; }
-  main section.card { margin: 0 0 1.25rem; border: 1px solid var(--ink-700); border-radius: 1rem; padding: 1rem 1.1rem 1.1rem; background: var(--ink-900); }
-  .card h2 { border-bottom: 1px solid var(--ink-800); padding-bottom: .45rem; }
-  .question { color: var(--neutral-400); font-size: .8rem; margin: .45rem 0 .5rem; }
+  /* 窄屏：左栏折成横向滚动的标签条，右栏占满宽度（仍然零 JS）。 */
+  @media (max-width: 48rem) {
+    /* minmax(0, 1fr)：1fr 的隐式最小尺寸是 min-content，宽表格会把整页撑破。 */
+    .layout { grid-template-columns: minmax(0, 1fr); }
+    .sidebar { flex-direction: row; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--ink-800); padding: .6rem .75rem 0; }
+    .nav-item { border-left: none; border-bottom: 2px solid transparent; white-space: nowrap; }
+    .nav-item[aria-current="page"] { border-bottom-color: var(--amber-400); }
+    .nav-label { display: none; }
+    .panel { padding: 1rem .9rem 3rem; }
+    /* 宽表格自己横向滚动，别把整页撑破（正文因此仍然正常换行）。 */
+    main section.card { overflow-x: auto; }
+    table { font-size: .78rem; }
+    th, td { padding: .25rem .45rem; }
+  }
 `;
 
 function renderTable(table: Table, limit: number, sectionId: string): string {
@@ -225,13 +294,44 @@ export interface UiPageOptions {
   days: number;
   /** 表格默认显示行数；测试用来构造长表格，默认 {@link UI_ROW_LIMIT}。 */
   rowLimit?: number;
+  /**
+   * `?m=` 的**原始值**（未做任何清洗）。缺失 / 空串 / 不存在的 id / 注入尝试
+   * 一律由 {@link parseSelection} 静默回落成「概览」，不 400、不报错、不回显。
+   */
+  metric?: string | null;
 }
 
-/** 窗口切换链接。 */
-function renderWindows(days: number): string {
+/**
+ * 解析左栏选中项（纯函数，便于单测）。
+ *
+ * 返回 `'overview'` 或某个**确实存在**的指标 id。注意这里是"白名单"：
+ * 只有 `available` 里的字面量才会被采纳，因此 `?m=<script>…` 这类输入
+ * 既不会被渲染、也不会被回显——它和不存在的 id 走同一条回落路径。
+ */
+export function parseSelection(raw: string | null | undefined, available: readonly string[]): string {
+  if (!raw) return UI_OVERVIEW_ID;
+  if (raw === UI_OVERVIEW_ID) return UI_OVERVIEW_ID;
+  return available.includes(raw) ? raw : UI_OVERVIEW_ID;
+}
+
+/**
+ * 生成本页链接：保留当前窗口，并在选中某个指标时带上 `m=`。
+ *
+ * 概览（未选中指标）时**不带** `m=`，所以 `?days=30` 仍然是最短的概览地址。
+ */
+function pageHref(days: number, selected: string, extra: Record<string, string> = {}): string {
+  const params = new URLSearchParams();
+  params.set('days', String(days));
+  if (selected !== UI_OVERVIEW_ID) params.set('m', selected);
+  for (const [key, value] of Object.entries(extra)) params.set(key, value);
+  return `?${params.toString()}`;
+}
+
+/** 窗口切换链接（保留当前选中的指标）。 */
+function renderWindows(days: number, selected: string): string {
   return UI_WINDOWS.map(window => {
     const current = window === days ? ' aria-current="page"' : '';
-    return `<a href="?days=${window}"${current}>${window} 天</a>`;
+    return `<a href="${pageHref(window, selected)}"${current}>${window} 天</a>`;
   }).join('');
 }
 
@@ -239,8 +339,28 @@ function renderWindows(days: number): string {
  * 手动刷新链接：服务端缓存最多存活 60 秒（见 `src/cache.ts`），
  * `?refresh=1` 立即绕过缓存重查。仍然是 GET、仍然只读——只是"不省这一次"。
  */
-function renderRefresh(days: number): string {
-  return `<a href="?days=${days}&refresh=1" title="忽略本机缓存，重新查询数据库（最多比平时多花几秒）">强制刷新</a>`;
+function renderRefresh(days: number, selected: string): string {
+  return `<a class="refresh" href="${pageHref(days, selected, { refresh: '1' })}" title="忽略本机缓存，重新查询数据库（最多比平时多花几秒）">刷新</a>`;
+}
+
+/** 左栏：「概览」+ 报告里实际存在的每个指标（顺序与报告一致）。 */
+function renderSidebar(report: StatsReport, selected: string, days: number): string {
+  const items = [
+    { id: UI_OVERVIEW_ID, label: UI_OVERVIEW_LABEL },
+    ...report.sections.map(section => ({
+      id: String(section.id),
+      label: UI_NAV_LABELS[section.id] ?? '',
+    })),
+  ];
+  return items
+    .map(item => {
+      const current = item.id === selected ? ' aria-current="page"' : '';
+      const name = item.id === UI_OVERVIEW_ID ? '概览' : item.id;
+      return `<a class="nav-item" href="${pageHref(days, item.id)}"${current}>`
+        + `<span class="nav-id">${escapeHtml(name)}</span>`
+        + `<span class="nav-label">${escapeHtml(item.label)}</span></a>`;
+    })
+    .join('\n');
 }
 
 function renderNames(report: StatsReport): string {
@@ -277,7 +397,7 @@ function sumColumn(section: SectionResult | undefined, column: string): number |
 }
 
 /**
- * 顶部概览区：四个大数字（抽取数 / 玩家数 / 新用户 / 一次性用户占比）。
+ * 概览区：四个大数字（抽取数 / 玩家数 / 新用户 / 一次性用户占比）。
  *
  * 前两个直接来自 `report.totals`；后两个来自 M2/M3 表格列的展示层合计。
  */
@@ -322,29 +442,39 @@ ${figures}
 </section>`;
 }
 
+/** 右栏·概览：标题 + 「问：…」+ 四个大数字 +（可选）用户明细。 */
+function renderOverviewPanel(report: StatsReport): string {
+  return `<section class="card" id="${UI_OVERVIEW_ID}">
+<h2>概览</h2>
+<p class="question">问：${escapeHtml(UI_OVERVIEW_QUESTION)}</p>
+${renderOverview(report)}
+${renderNames(report)}
+</section>`;
+}
+
+/** 右栏·单个指标：标题 + 「问：…」+ 表格 + 注。**其余指标一个字都不渲染。** */
+function renderMetricPanel(section: SectionResult, limit: number): string {
+  const notes = section.notes
+    .map(note => {
+      const cls = `note${noteClass(note) ? ` ${NEUTRAL_NOTE_CLASS}` : ''}`;
+      return `<p class="${cls}">注：${escapeHtml(note)}</p>`;
+    })
+    .join('\n');
+  return `<section class="card" id="${escapeHtml(String(section.id))}">
+<h2>${escapeHtml(String(section.id))} ${escapeHtml(section.title)}</h2>
+<p class="question">问：${escapeHtml(section.question)}</p>
+${renderTable(section.table, limit, String(section.id))}
+${notes}
+</section>`;
+}
+
 /** 渲染整页。所有来自数据库的文本都过 {@link escapeHtml}。 */
 export function renderUiPage(report: StatsReport, options: UiPageOptions): string {
   const limit = options.rowLimit ?? UI_ROW_LIMIT;
-
-  const metricsNav = report.sections
-    .map(section => `<a href="#${escapeHtml(section.id)}">${escapeHtml(section.id)}</a>`)
-    .join('');
-
-  const sections = report.sections
-    .map(
-      section => `<section class="card" id="${escapeHtml(section.id)}">
-<h2>${escapeHtml(section.id)} ${escapeHtml(section.title)}</h2>
-<p class="question">问：${escapeHtml(section.question)}</p>
-${renderTable(section.table, limit, section.id)}
-${section.notes
-  .map(note => {
-    const cls = `note${noteClass(note) ? ` ${NEUTRAL_NOTE_CLASS}` : ''}`;
-    return `<p class="${cls}">注：${escapeHtml(note)}</p>`;
-  })
-  .join('\n')}
-</section>`,
-    )
-    .join('\n');
+  const days = options.days;
+  const available = report.sections.map(section => String(section.id));
+  const selected = parseSelection(options.metric, available);
+  const section = report.sections.find(candidate => String(candidate.id) === selected);
 
   const warnings = report.warnings
     .map(warning => `<p class="warning">⚠ ${escapeHtml(warning)}</p>`)
@@ -359,20 +489,29 @@ ${section.notes
 <style>${UI_CSS}</style>
 </head>
 <body>
-<header>
-<h1>HueDle 只读统计 UI</h1>
-<p class="meta">窗口：最近 ${report.windowDays} 天（起始 ${escapeHtml(report.windowStart)}）；生成时间：${escapeHtml(report.generatedAt)}</p>
+<header class="topbar">
+<div class="brand">
+<h1>HueDle 只读统计</h1>
 <p class="meta">连接：${escapeHtml(report.connection)}</p>
-<p class="meta">本服务只监听 127.0.0.1，只有 GET 路由，无登录、无 CORS、不写任何文件；所有查询走只读事务。</p>
+</div>
+<div class="toolbar">
+<nav class="windows" aria-label="时间窗口">窗口：${renderWindows(days, selected)}</nav>
+${renderRefresh(days, selected)}
+</div>
 </header>
-<nav aria-label="时间窗口">窗口：${renderWindows(options.days)} ${renderRefresh(options.days)}</nav>
-${renderOverview(report)}
-<nav class="metrics" aria-label="指标跳转">指标：${metricsNav}</nav>
+<p class="meta bar-note">窗口：最近 ${report.windowDays} 天（起始 ${escapeHtml(report.windowStart)}）；生成时间：${escapeHtml(report.generatedAt)}</p>
 ${warnings}
-<main>
-${sections}
-${renderNames(report)}
+<div class="layout">
+<nav class="sidebar" aria-label="指标导航">
+${renderSidebar(report, selected, days)}
+</nav>
+<main class="panel">
+${section ? renderMetricPanel(section, limit) : renderOverviewPanel(report)}
 </main>
+</div>
+<footer class="page-foot">
+<p class="meta">本服务只监听 127.0.0.1，只有 GET 路由，无登录、无 CORS、不写任何文件；所有查询走只读事务。</p>
+</footer>
 </body>
 </html>
 `;
@@ -389,9 +528,11 @@ export function renderUiError(status: number, message: string): string {
 <style>${UI_CSS}</style>
 </head>
 <body>
+<div class="panel">
 <h1>${status}</h1>
 <p>${escapeHtml(message)}</p>
 <p class="meta"><a href="/">← 回到统计页</a></p>
+</div>
 </body>
 </html>
 `;

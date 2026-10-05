@@ -10,8 +10,12 @@
  *      路由只接受 `GET`/`HEAD`，其余方法一律 405——**根本没有写端点**。
  *   ⑤ 不发任何 CORS 头，不登录，不 daemon 化，不写 pid/文件。
  *
- * 查询参数只有 `?days=`（1–3650 的整数，非法值 400，绝不做字符串拼接）与
- * `?refresh=1`（只表示"绕过本机内存缓存重查"，仍然是 GET、仍然只读）。
+ * 查询参数只有三个：
+ *   - `?days=`（1–3650 的整数，非法值 400，绝不做字符串拼接）；
+ *   - `?refresh=1`（只表示"绕过本机内存缓存重查"，仍然是 GET、仍然只读）；
+ *   - `?m=`（左栏选中项：`overview` 或 M1–M8；**非法值静默回落概览**，不 400——
+ *     这里不做校验是因为渲染层本来就只认"报告里存在的 id"，回落语义见 `ui/render.ts`
+ *     的 `parseSelection`；原始输入不会被回显，因此注入尝试也没有落点）。
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -395,7 +399,9 @@ async function handleRequest(
 
   try {
     const report = await options.loadReport(parsed.days, { refresh });
-    send(res, 200, renderUiPage(report, { days: parsed.days }), {}, method === 'HEAD');
+    // `?m=` 原样交给渲染层；它只认报告里存在的 id，其余（含注入尝试）一律回落概览。
+    const metric = url.searchParams.get('m');
+    send(res, 200, renderUiPage(report, { days: parsed.days, metric }), {}, method === 'HEAD');
   } catch (err) {
     // 与 CLI 同口径：错误信息先脱敏，绝不把连接串/密码带进页面。
     const message = err instanceof Error ? err.message : String(err);

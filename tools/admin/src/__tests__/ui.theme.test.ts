@@ -48,11 +48,19 @@ function rule(selector: string): string {
   return rules.join(' ');
 }
 
-/** 把某个指标的真实分析结果渲染成整页。 */
+/**
+ * 把某个指标的真实分析结果渲染成整页。
+ *
+ * 控制台式版面下右侧**只渲染选中的那一项**，所以这里必须显式 `metric: id`
+ * 才能让这个指标的表格真的出现在页面上（否则渲染的是概览）。
+ */
 function pageWith(id: string, rows: unknown[], extra: unknown[] = [], draws = 1000): string {
   const metric = METRICS.find(m => m.id === id)!;
   const section = analyzeMetric(metric, rows as never, extra as never, contextForDraws(draws, 200));
-  return renderUiPage(sampleReport({ sections: [section] } as Partial<StatsReport>), { days: 30 });
+  return renderUiPage(sampleReport({ sections: [section] } as Partial<StatsReport>), {
+    days: 30,
+    metric: id,
+  });
 }
 
 describe('测试 1：哨兵指标的两种状态用不同的类与不同的颜色', () => {
@@ -169,7 +177,7 @@ describe('测试 2（反向断言）：「样本不足 / 不给结论」必须�
         },
       ],
     });
-    const pageHtml = renderUiPage(note, { days: 30 });
+    const pageHtml = renderUiPage(note, { days: 30, metric: 'M4' });
     expect(pageHtml).toContain(`class="caption ${NEUTRAL_NOTE_CLASS}"`);
     expect(pageHtml).toContain(`<p class="note ${NEUTRAL_NOTE_CLASS}">注：窗口内 draws &lt; 200`);
     expect(pageHtml).not.toContain('class="warning"');
@@ -252,7 +260,7 @@ describe('测试 4：无外链（含字体 / CDN / 图片）', () => {
 });
 
 describe('测试 5：没有 <script>（零前端 JS）', () => {
-  it('整页与错误页都不含 <script>，交互只靠 a / details / 锚点', () => {
+  it('整页与错误页都不含 <script>，交互只靠 a / details / 左栏链接', () => {
     const long = sampleReport({
       sections: [
         {
@@ -267,11 +275,12 @@ describe('测试 5：没有 <script>（零前端 JS）', () => {
         },
       ],
     });
-    const html = renderUiPage(long, { days: 30 });
+    // 控制台式版面：换指标也是普通 GET 链接（`?m=`），同样一行 JS 都不需要。
+    const html = renderUiPage(long, { days: 30, metric: 'M6' });
     expect(html.toLowerCase()).not.toContain('<script');
     expect(renderUiError(405, 'x').toLowerCase()).not.toContain('<script');
     expect(html).toContain('<details class="more">');
-    expect(html).toContain('href="?days=7"');
-    expect(html).toContain('href="#M6"');
+    expect(html).toContain('href="?days=7&m=M6"');
+    expect(html).toContain('href="?days=30&m=M6" aria-current="page"');
   });
 });

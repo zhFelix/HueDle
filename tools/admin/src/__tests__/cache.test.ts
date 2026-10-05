@@ -252,8 +252,9 @@ describe('测试 4：缓存不改变口径（M4 样本门槛）', () => {
     });
     const served = await serve((days, options) => loader.loadReport({ ...KEY, days }, options));
     try {
-      const first = await (await fetch(`${served.base}/?days=30`)).text();
-      const second = await (await fetch(`${served.base}/?days=30`)).text();
+      // 控制台式版面：右侧只渲染选中的那一项，所以要看 M4 的结论就得先选中它（`?m=M4`）。
+      const first = await (await fetch(`${served.base}/?days=30&m=M4`)).text();
+      const second = await (await fetch(`${served.base}/?days=30&m=M4`)).text();
       expect(dbQueries).toBe(1);
       expect(second).toBe(first);
       expect(first).toContain('不给结论');

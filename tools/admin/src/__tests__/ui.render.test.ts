@@ -99,21 +99,24 @@ describe('交互：窗口切换 / 指标跳转 / 长表格展开', () => {
     expect(html).not.toContain('href="?days=7" aria-current="page"');
   });
 
-  it('提供 M1–M8 的锚点跳转，且 section 有对应 id', () => {
+  it('左栏为每个指标提供「换指标」链接（零 JS，服务端只渲染选中的那一项）', () => {
     for (const id of ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8']) {
-      expect(html).toContain(`href="#${id}"`);
-      expect(html).toContain(`id="${id}"`);
+      expect(html).toContain(`href="?days=90&m=${id}"`);
     }
   });
 
-  it('每个指标都带上它回答什么问题（直接复用 stats.ts 的 question）', () => {
-    for (const metric of METRICS) expect(html).toContain(escapeHtml(metric.question));
+  it('每个指标被选中时都带上它回答什么问题（直接复用 stats.ts 的 question）', () => {
+    for (const metric of METRICS) {
+      const page = renderUiPage(buildFullReport(), { days: 30, metric: metric.id });
+      expect(page).toContain(escapeHtml(metric.question));
+    }
   });
 
   it('长表格默认只显示前 N 行，其余折进 <details> 可展开', () => {
     expect(UI_ROW_LIMIT).toBe(10);
     const page = renderUiPage(tableReport({ columns: ['周', '稀有度', '数量', '占比'], rows: longRows(25, 'w') }), {
       days: 30,
+      metric: 'M6',
     });
     const [visible, expanded] = page.split('<details class="more">');
 
@@ -132,14 +135,18 @@ describe('交互：窗口切换 / 指标跳转 / 长表格展开', () => {
     const metric = METRICS.find(m => m.id === 'M4')!;
     const rows = Array.from({ length: 40 }, () => ({ badge_id: 'casino-pair', hit_days: 400 }));
     const section = analyzeMetric(metric, rows as never, [], contextForDraws(100_000, 200));
-    const page = renderUiPage(sampleReport({ sections: [section] }), { days: 30 });
+    const page = renderUiPage(sampleReport({ sections: [section] }), { days: 30, metric: 'M4' });
     const [visible, expanded] = page.split('<details class="more">');
     expect(visible).toContain('casino-pair');
     expect(expanded).toContain('展开其余 30 行（共 40 行）');
   });
 
   it('rowLimit 可调（服务端为同一份渲染逻辑提供了参数）', () => {
-    const page = renderUiPage(tableReport({ columns: ['a'], rows: longRows(5, 'x') }), { days: 30, rowLimit: 2 });
+    const page = renderUiPage(tableReport({ columns: ['a'], rows: longRows(5, 'x') }), {
+      days: 30,
+      rowLimit: 2,
+      metric: 'M6',
+    });
     expect(page.split('<details class="more">')[0]).not.toContain('x03');
     expect(page).toContain('展开其余 3 行（共 5 行）');
   });
@@ -162,7 +169,7 @@ describe('测试 7：draws < 200 时 M4 仍然拒绝给结论', () => {
       [],
       contextForDraws(150, 200),
     );
-    const page = renderUiPage(sampleReport({ sections: [section] }), { days: 30 });
+    const page = renderUiPage(sampleReport({ sections: [section] }), { days: 30, metric: 'M4' });
 
     expect(page).toContain('不给结论');
     expect(page).toContain('casino-pair');
@@ -212,7 +219,7 @@ describe('转义与健壮性', () => {
           },
         ],
       }),
-      { days: 30 },
+      { days: 30, metric: 'M1' },
     );
     expect(page).not.toContain('<img src=x');
     expect(page).not.toContain('<script>alert');
@@ -220,7 +227,7 @@ describe('转义与健壮性', () => {
   });
 
   it('空表格渲染「（无数据）」而不是空 <tbody>', () => {
-    const page = renderUiPage(tableReport({ columns: ['a'], rows: [] }), { days: 30 });
+    const page = renderUiPage(tableReport({ columns: ['a'], rows: [] }), { days: 30, metric: 'M6' });
     expect(page).toContain('（无数据）');
   });
 
@@ -267,10 +274,12 @@ describe('概览区：四个大数字', () => {
   });
   const html = renderUiPage(report, { days: 30 });
 
-  it('四项标题齐备，且出现在概览区（header 之后、指标锚点之前）', () => {
+  it('四项标题齐备，且默认（未指定 ?m=）落在概览面板里', () => {
     expect(html).toContain('class="overview"');
     for (const label of UI_OVERVIEW_LABELS) expect(html).toContain(label);
-    expect(html.indexOf('class="overview"')).toBeLessThan(html.indexOf('指标：'));
+    // 默认选中左栏第一项「概览」：导航项高亮，右栏内容就是概览（在左栏之后）。
+    expect(html).toContain('<a class="nav-item" href="?days=30" aria-current="page">');
+    expect(html.indexOf('class="overview"')).toBeGreaterThan(html.indexOf('class="sidebar"'));
   });
 
   it('四个数字都正确（含由 M2/M3 列合计得出的两项）', () => {
@@ -288,28 +297,33 @@ describe('概览区：四个大数字', () => {
   });
 });
 
-describe('卡片：每个指标一张卡 + 回答什么问题 + 长表格默认折叠', () => {
-  const html = renderUiPage(buildFullReport(), { days: 30 });
-
-  it('每个指标都是一张 card，且卡片里出现它回答什么问题（复用 stats.ts 的 question）', () => {
+describe('详情面板：右栏只渲染选中的那一项', () => {
+  it('选中某个指标时页面上只有它一张 card，其它指标的标题与问题一个字都没有', () => {
     for (const metric of METRICS) {
+      const html = renderUiPage(buildFullReport(), { days: 30, metric: metric.id });
       expect(html).toContain(`<section class="card" id="${metric.id}">`);
+      expect(html.match(/<section class="card"/g)).toHaveLength(1);
       expect(html).toContain(escapeHtml(metric.question));
+      for (const other of METRICS) {
+        if (other.id === metric.id) continue;
+        expect(html, `${metric.id} 页面上不该出现 ${other.id} 的标题`).not.toContain(escapeHtml(other.title));
+        expect(html, `${metric.id} 页面上不该出现 ${other.id} 的问题`).not.toContain(escapeHtml(other.question));
+      }
     }
-    expect(html.match(/<section class="card"/g)).toHaveLength(METRICS.length);
   });
 
   it('长表格折进 <details>，默认不带 open（浏览器原生折叠）', () => {
     const page = renderUiPage(
       tableReport({ columns: ['周', '稀有度', '数量', '占比'], rows: longRows(25, 'w') }),
-      { days: 30 },
+      { days: 30, metric: 'M6' },
     );
     expect(page).toContain('<details class="more">');
     expect(page).not.toContain('<details open');
     expect(page).not.toMatch(/<details[^>]*\sopen/);
   });
 
-  it('卡片页依旧无 <script>、无外链（断网可用）', () => {
+  it('详情页依旧无 <script>、无外链（断网可用）', () => {
+    const html = renderUiPage(buildFullReport(), { days: 30, metric: 'M3' });
     expect(html.toLowerCase()).not.toContain('<script');
     expect(html).not.toContain('http://');
     expect(html).not.toContain('https://');
