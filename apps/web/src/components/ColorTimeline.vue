@@ -42,6 +42,27 @@
  * 容器限高（约 4 行）并默认滚到底部 + 最右，保证一进来看到的就是最新那几天，
  * 而不是把整条历史铺满页面。
  *
+ * ── 「今天」：一个下方的 ▲，不是描边 ────────────────────────────────────────
+ *
+ * 今天那格**不描边**（曾经是琥珀 ring）：`ring` 会改变格子的外轮廓，在一条连续
+ * 色带上看起来像「这一格坏了 / 被选中了」，而不是「这是今天」。改用格子**正下方**
+ * 一个 8×4px 的琥珀 ▲：
+ *
+ *   - 指向正上方那格（它的指代对象），是标注（caret）的常规方向；▼ 会指向下面的
+ *     空白 / 下一行，那里没有任何东西。
+ *   - 颜色沿用被去掉的 ring 的 `amber-400`，于是「今天」的视觉联想不变；
+ *     8×4px 是最小可辨尺寸，不参与色带的抢眼程度。
+ *   - **不占布局**：`absolute top-full`，落在 64px 色带下方的留白里，不挤动任何格子。
+ *
+ * 空间从哪来：滚动容器给 `pb-2`（8px）的底部留白，▲ 只有 4px 高，正好落在留白里，
+ * 离下一行 / 容器边缘还有 4px。容器默认滚到底（`scrollToLatest`），留白与 ▲ 都在
+ * 可视区内，不会被 `max-h-72` 裁掉。
+ *
+ * 为什么不会压到下一行：`today` 是**最后一天**（历史记录不会晚于今天），所以它一定
+ * 落在最后一行的末尾，下方只有容器底部留白。若存档里出现「未来日期」（脏数据），
+ * 今天会排在中间，▲ 会与下一行有 2px 重叠——这是已知的、只可能由脏数据触发的边界，
+ * 不为它增加布局复杂度。
+ *
  * ── 纯展示 ──────────────────────────────────────────────────────────────────
  *
  * 数据**全部由 props 传入**（`entries`），组件内部**不调 `useHistory()`**、
@@ -62,12 +83,13 @@ import {
   timelineAriaLabel,
   timelineTitle,
   type TimelineCell,
+  type TimelineDay,
 } from '../lib/timeline';
 
 const props = defineProps<{
   /** 历史记录（`useHistory().entries`，降序或任意顺序都行——内部会排序）。 */
   entries: HistoryItem[];
-  /** `YYYY-MM-DD`，用于给「今天」那格加琥珀 ring。省略则取当前 UTC 日期。 */
+  /** `YYYY-MM-DD`，用于标出「今天」那格（见下方 ▲ 标记）。省略则取当前 UTC 日期。 */
   today?: string;
   /**
    * 每行放几格。省略时按容器实测宽度自适应（推荐）；
@@ -112,6 +134,27 @@ function entryStyle(cell: TimelineCell): Record<string, string> {
   return cell.link === null
     ? { backgroundColor: cell.day.hex }
     : { backgroundImage: `linear-gradient(to right, ${cell.link.from}, ${cell.link.to})` };
+}
+
+/**
+ * 「今天」只能从**颜色之外**的第二条通道读出来。
+ *
+ * 去掉 ring 之后，今天与其它格子在视觉上完全一致（只靠下方 ▲ 区分），而 ▲ 是
+ * `aria-hidden` 的纯装饰——所以「今天」这件事必须写进色块的 `title` / `aria-label`，
+ * 否则屏幕阅读器与键盘用户会**彻底丢失**这个信息（这是无障碍退化，不是简化）。
+ *
+ * 格式仍由 `lib/timeline.ts` 的纯函数决定（`{date} · {hex}` / `{date} {hex}`），
+ * 这里只按渲染上下文追加一个不含内部术语的后缀。
+ */
+function dayTitle(day: TimelineDay): string {
+  const base = timelineTitle(day);
+  return day.isToday ? `${base} · 今天` : base;
+}
+
+/** 与 {@link dayTitle} 同信息，只换分隔符（沿用 `timelineAriaLabel` 的约定）。 */
+function dayLabel(day: TimelineDay): string {
+  const base = timelineAriaLabel(day);
+  return day.isToday ? `${base} 今天` : base;
 }
 
 /**
@@ -190,6 +233,10 @@ watch(rows, () => {
       空历史时刻意**不渲染滚动容器**：空的滚动容器会显示成一条灰色横条，
       看起来像个 bug（设计文档 §3.6）。
 
+      `pb-2`（8px）不只是呼吸感：它是**今天那个 ▲ 的落点**。▲ 只有 4px 高，
+      绝对定位在 64px 色带的正下方（`top-full`），整好落在这段留白里，不占任何
+      格子的高度、不挤动折行。容器默认滚到底，所以留白和 ▲ 都在可视区内。
+
       `max-h-72`（≈4 行）+ 默认滚到底：行是升序自上而下的，最新在最后一行，
       所以「看到最新」= 滚到底部 + 最右。
       `[scrollbar-gutter:stable]` 让纵向滚动条**恒占位**：否则滚动条出现 / 消失会
@@ -198,7 +245,7 @@ watch(rows, () => {
     <div
       v-else
       ref="scroller"
-      class="max-h-72 overflow-auto pb-1 [scrollbar-gutter:stable]"
+      class="max-h-72 overflow-auto pb-2 [scrollbar-gutter:stable]"
       data-testid="timeline-scroller"
     >
       <div class="space-y-0.5" data-testid="timeline-rows">
@@ -217,7 +264,7 @@ watch(rows, () => {
           <li
             v-for="cell in row.cells"
             :key="cell.day.date"
-            class="w-3 shrink-0"
+            class="relative w-3 shrink-0"
             :data-testid="'timeline-cell'"
             :data-cell-date="cell.day.date"
             :data-row-start="cell.isRowStart ? 'true' : 'false'"
@@ -226,10 +273,9 @@ watch(rows, () => {
               v-if="cell.day.kind === 'entry'"
               type="button"
               class="block h-full w-3 transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
-              :class="{ 'ring-2 ring-amber-400': cell.day.isToday }"
               :style="entryStyle(cell)"
-              :title="timelineTitle(cell.day)"
-              :aria-label="timelineAriaLabel(cell.day)"
+              :title="dayTitle(cell.day)"
+              :aria-label="dayLabel(cell.day)"
               :data-testid="'timeline-day'"
               :data-date="cell.day.date"
               :data-today="cell.day.isToday ? 'true' : 'false'"
@@ -245,6 +291,25 @@ watch(rows, () => {
               aria-hidden="true"
               :data-testid="'timeline-gap'"
               :data-date="cell.day.date"
+            ></span>
+
+            <!--
+              「今天」的 ▲：8px 宽 × 4px 高，横向居中在 12px 的格子上，紧贴色带
+              下沿（`top-full` = 那一行 64px 的底边）。零尺寸盒 + 透明左右边框 +
+              琥珀下边框 = 一个指向上方的三角形（▼ 会指向下方的留白，没有指代对象）。
+
+              绝对定位 ⇒ **完全不参与布局**：不改变格子的高度、不改变折行位置、
+              不推挤任何相邻格子；琥珀色沿用被去掉的 ring，尺寸刻意最小，
+              标记不该抢色带的注意力。
+
+              `aria-hidden`：这是纯视觉标记，「今天」已经写进色块的 `aria-label`
+              （见 `dayLabel`），读两遍只会更吵。
+            -->
+            <span
+              v-if="cell.day.isToday"
+              class="pointer-events-none absolute left-1/2 top-full h-0 w-0 -translate-x-1/2 border-x-4 border-b-4 border-x-transparent border-b-amber-400"
+              aria-hidden="true"
+              data-testid="timeline-today-marker"
             ></span>
           </li>
         </ol>

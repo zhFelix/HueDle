@@ -40,6 +40,11 @@ function gaps(root: HTMLElement): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>('[data-testid="timeline-gap"]')];
 }
 
+/** 今天那格下方的三角标记（去掉 ring 之后的「今天」视觉通道）。 */
+function todayMarkers(root: HTMLElement): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>('[data-testid="timeline-today-marker"]')];
+}
+
 function dateList(nodes: readonly HTMLElement[]): string[] {
   return nodes.map(node => node.dataset.date ?? '');
 }
@@ -177,14 +182,14 @@ describe('④ 空历史 / 单天：不崩、不出现 NaN', () => {
 
     expect(blocks(root)).toHaveLength(1);
     expect(block?.dataset.today).toBe('true');
-    expect(block?.getAttribute('title')).toBe('2026-03-04 · #002FA7');
+    expect(block?.getAttribute('title')).toBe('2026-03-04 · #002FA7 · 今天');
     expect(root.textContent).not.toContain('NaN');
     expect(root.textContent).toContain('1 天');
   });
 });
 
 describe('⑤ 跨月跨年 / 今天标记', () => {
-  it('2026-12-31 + 2027-01-01 → 2 个色块 0 缺口，今天那格有琥珀 ring', async () => {
+  it('2026-12-31 + 2027-01-01 → 2 个色块 0 缺口，今天那格没有 ring、只有下方 ▲', async () => {
     const root = await mount([item('2026-12-31'), item('2027-01-01')], '2027-01-01');
 
     expect(dateList(blocks(root))).toEqual(['2026-12-31', '2027-01-01']);
@@ -192,10 +197,14 @@ describe('⑤ 跨月跨年 / 今天标记', () => {
 
     const [older, today] = blocks(root);
     expect(older?.dataset.today).toBe('false');
-    expect(older?.className).not.toContain('ring-amber-400');
     expect(today?.dataset.today).toBe('true');
-    expect(today?.className).toContain('ring-2');
-    expect(today?.className).toContain('ring-amber-400');
+
+    // 今天**不再靠描边**：按钮上一个 ring 类都没有。
+    expect(today?.className).not.toContain('ring-2');
+    expect(today?.className).not.toContain('ring-amber-400');
+
+    // 「今天」改由它下方的三角标记承担。
+    expect(todayMarkers(root)).toHaveLength(1);
   });
 
   it('不传 today 时没有格子被标成今天（组件用真实 UTC 日期兜底，但不会崩）', async () => {
@@ -223,12 +232,12 @@ describe('⑥ tooltip 文本：格式正确，且不含内部术语', () => {
     '登录模式',
   ];
 
-  it('色块 title = `{date} · {hex}`，aria-label = `{date} {hex}`', async () => {
+  it('色块 title = `{date} · {hex}`，aria-label = `{date} {hex}`（今天那格再缀「今天」）', async () => {
     const root = await mount([item('2026-03-04', { hex: '#002fa7' })], '2026-03-04');
     const block = blocks(root)[0];
 
-    expect(block?.getAttribute('title')).toBe('2026-03-04 · #002FA7');
-    expect(block?.getAttribute('aria-label')).toBe('2026-03-04 #002FA7');
+    expect(block?.getAttribute('title')).toBe('2026-03-04 · #002FA7 · 今天');
+    expect(block?.getAttribute('aria-label')).toBe('2026-03-04 #002FA7 今天');
   });
 
   it('整条时间线（含缺口）的可读文本里没有任何内部术语', async () => {
@@ -512,8 +521,8 @@ describe('⑩ 折行：容量 → 行数正确，且**换行处不出现渐变**
   });
 });
 
-describe('⑪ 旧语义一个都不能少：今天 ring / tooltip / 缺口可见 / 键盘可聚焦', () => {
-  it('今天那格仍是琥珀 ring，其余不是', async () => {
+describe('⑪ 旧语义一个都不能少：今天标记 / tooltip / 缺口可见 / 键盘可聚焦', () => {
+  it('今天那格没有任何 ring（与普通格子 class 完全一致），标记改在下方 ▲', async () => {
     const root = await mountWith(
       [item('2026-03-01', { hex: '#111111' }), item('2026-03-02', { hex: '#222222' })],
       '2026-03-02',
@@ -521,10 +530,16 @@ describe('⑪ 旧语义一个都不能少：今天 ring / tooltip / 缺口可见
     );
 
     const [older, todayBlock] = blocks(root);
-    expect(older?.className).not.toContain('ring-amber-400');
     expect(todayBlock?.dataset.today).toBe('true');
-    expect(todayBlock?.className).toContain('ring-2');
-    expect(todayBlock?.className).toContain('ring-amber-400');
+    expect(todayBlock?.className).not.toContain('ring-2');
+    expect(todayBlock?.className).not.toContain('ring-amber-400');
+    // 与普通格子用的是同一套 class ⇒ 描边不可能还留在今天那格上。
+    expect(todayBlock?.className).toBe(older?.className);
+    expect(todayBlock?.style.boxShadow).toBe('');
+
+    for (const block of blocks(root)) {
+      expect(block.className).not.toContain('ring');
+    }
   });
 
   it('tooltip 仍是 `日期 · HEX`，缺口仍是 `日期 · 没有记录`', async () => {
@@ -782,5 +797,86 @@ describe('⑬ 每格自己就是渐变：有 link 的格子是渐变，没 link 
     expect(isFading(row2![0]!)).toBe(false);
     expect(backgroundOf(row2![0]!)).not.toContain('rgb(0, 0, 2)');
     expect(backgroundOf(row2![0]!)).toContain('rgb(0, 0, 3)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑭ 「今天」改成不描边、用下方 ▲ 标出
+// ---------------------------------------------------------------------------
+//
+// jsdom 不做布局，所以「三角真的没被裁掉 / 真的在格子正下方」由真实浏览器截图
+// 取证（见提交说明）；这里断言的是**结构契约**：标记挂在今天那格的 <li> 里、
+// 只挂在它一个格子上、靠 `top-full` + 居中定位、纯装饰不进无障碍树。
+describe('⑭ 今天的标记：没有 ring，改成色带下方的 ▲', () => {
+  async function twoDays(): Promise<HTMLDivElement> {
+    return mountWith(
+      [item('2026-03-01', { hex: '#111111' }), item('2026-03-02', { hex: '#222222' })],
+      '2026-03-02',
+      3,
+    );
+  }
+
+  it('① 今天那格没有任何 ring 类（反向断言：原来那组描边类一个都不在）', async () => {
+    const root = await twoDays();
+
+    const [older, todayBlock] = blocks(root);
+    expect(todayBlock?.dataset.today).toBe('true');
+
+    // 今天与其它格子视觉一致：class 完全相同，没有任何按 isToday 加的描边。
+    expect(todayBlock?.className).toBe(older?.className);
+    for (const block of blocks(root)) {
+      expect(block.className).not.toContain('ring-2');
+      expect(block.className).not.toContain('ring-amber-400');
+      expect(block.className).not.toContain('ring');
+    }
+  });
+
+  it('② 今天那格正下方有三角元素，且只有今天那一格有', async () => {
+    const root = await twoDays();
+
+    const markers = todayMarkers(root);
+    expect(markers).toHaveLength(1);
+
+    // 挂在**今天那格**里（不是别的格、也不是行容器 / 滚动容器）。
+    const cell = markers[0]?.closest<HTMLElement>('[data-testid="timeline-cell"]');
+    expect(cell?.getAttribute('data-cell-date')).toBe('2026-03-02');
+    expect(cells(root)[0]?.querySelector('[data-testid="timeline-today-marker"]')).toBeNull();
+
+    // 几何契约：紧贴色带下沿（top-full）、横向居中在 12px 格子上（left-1/2 + -translate）。
+    const marker = markers[0]!;
+    expect(marker.className).toContain('top-full');
+    expect(marker.className).toContain('left-1/2');
+    expect(marker.className).toContain('-translate-x-1/2');
+    // 不参与命中测试（绝不挡格子的 hover / 点击）。
+    expect(marker.className).toContain('pointer-events-none');
+
+    // 指向上方的三角形 = 零尺寸盒 + 透明左右边框 + 有色的**下**边框。
+    expect(marker.className).toContain('border-x-transparent');
+    expect(marker.className).toContain('border-b-amber-400');
+    expect(marker.className).not.toContain('border-t-amber-400');
+  });
+
+  it('③ aria-label / title 仍能读出「今天」（去掉框后信息不丢）', async () => {
+    const root = await twoDays();
+
+    const [older, todayBlock] = blocks(root);
+    expect(todayBlock?.getAttribute('aria-label')).toContain('今天');
+    expect(todayBlock?.getAttribute('title')).toContain('今天');
+    // 加「今天」不能挤掉日期与颜色。
+    expect(todayBlock?.getAttribute('aria-label')).toContain('2026-03-02');
+    expect(todayBlock?.getAttribute('aria-label')).toContain('#222222');
+
+    // 不是今天的那格不能被误标。
+    expect(older?.getAttribute('aria-label')).not.toContain('今天');
+    expect(older?.getAttribute('title')).not.toContain('今天');
+  });
+
+  it('④ 三角是 aria-hidden（信息已在格子的 aria 里，不重复朗读）', async () => {
+    const root = await twoDays();
+
+    const marker = todayMarkers(root)[0]!;
+    expect(marker.getAttribute('aria-hidden')).toBe('true');
+    // 它是空元素：不往可读文本里加任何字符。
+    expect(marker.textContent).toBe('');
   });
 });
