@@ -68,6 +68,11 @@ export function renderTreeItem(item: TreeItem, options: { token?: string } = {})
   const failure = item.failed
     ? `<span class="item-fail" title="${escapeHtml(item.failReason ?? '运行失败')}">✕</span>`
     : '';
+  // 「编辑」是零 JS 的：只是一条指向 `?edit=<draftId>` 的链接，服务端据此带着值渲染表单。
+  const edit =
+    item.draftId !== undefined
+      ? `<a class="draft-edit" href="/badge?edit=${encodeURIComponent(item.draftId)}" title="把这条草稿载入上方表单，改完「只保存」会替换它">编辑</a>`
+      : '';
   const remove =
     item.draftId !== undefined
       ? `<form class="draft-del" method="post" action="/badge/draft/delete">`
@@ -85,7 +90,7 @@ export function renderTreeItem(item: TreeItem, options: { token?: string } = {})
 <span class="item-id">${escapeHtml(item.id)}</span>
 <span class="item-name">${escapeHtml(item.name)}</span>
 <span class="item-family">${escapeHtml(item.family)}</span>
-${restored}${failure}${remove}
+${restored}${failure}${edit}${remove}
 </li>`;
 }
 
@@ -94,12 +99,22 @@ function renderItems(batch: TreeBatch, token?: string): string {
 }
 
 /**
- * 「待确认」批次的展开内容：警告清单 + 两个按钮。
+ * 「待确认」批次的**独立区块**：标题行（条数 + 继续/修改）+ 折叠的警告清单。
  *
- * 警告文案**必须写清这不是错误**（否则用户会以为失败了）；按钮是「继续」与「修改」，
- * 都走与其它写端点完全相同的令牌检查。
+ * 为什么从树里搬出来：状态卡显示的是**当前这次运行**，而待确认正是这次运行要你决定的
+ * 事情，两者应当挨着（「待确认的批次放到日志下方」）。树里只留下历史批次的标题行，
+ * 不再重复待确认块。
+ *
+ * 版面要点（对应「[继续] [修改] 提到标题行上」）：
+ *   - 标题行左侧是状态图标 + `待确认 · N 条单向蕴含警告`（不展开也知道有几条）；
+ *   - 两个按钮放在同一个 `.awaiting-head` 容器里、靠右（`margin-left:auto`），
+ *     因此 13 条警告也不需要滚到末尾才够得到；
+ *   - 警告清单折进一个**默认不展开**的 `<details>`：版面干净，明细随点随看。
+ *
+ * 警告文案**必须写清这不是错误**（否则用户会以为失败了）；两个按钮都是原生表单 POST，
+ * 走与其它写端点完全相同的令牌检查。
  */
-function renderAwaiting(batch: TreeBatch, token?: string): string {
+function renderAwaitingBlock(batch: TreeBatch, token?: string): string {
   const warnings = batch.warnings ?? [];
   const list = warnings.length > 0
     ? `<ul class="batch-warnings">\n${warnings
@@ -115,25 +130,44 @@ function renderAwaiting(batch: TreeBatch, token?: string): string {
   const hashInput = batch.specHash
     ? `<input type="hidden" name="specHash" value="${escapeHtml(batch.specHash)}">`
     : '';
-  return `<div class="batch-awaiting">
-<p class="batch-awaiting-note"><strong>待确认</strong>：干跑没有任何硬错误，只有 ${warnings.length} 条<b>单向蕴含警告</b>。
-单向蕴含是徽章系统的固有性质（越稀有的徽章必然被更宽的徽章包含），<strong>它不阻止写入，也不是失败</strong>；
-工作区仍然零改动。点「继续」才写盘；点「修改」则把这一批的 spec <b>放回暂存区</b>，可以接着改。</p>
-${list}
-<div class="batch-actions">
+  return `<div class="awaiting-block" data-run-id="${escapeHtml(batch.key)}">
+<div class="awaiting-head">
+${renderBatchIcon(batch)}
+<span class="awaiting-title">待确认 · ${warnings.length} 条单向蕴含警告</span>
+<span class="awaiting-actions">
 <form method="post" action="/badge/continue">
 <input type="hidden" name="token" value="${escapeHtml(token ?? '')}">
 <input type="hidden" name="runId" value="${escapeHtml(batch.key)}">
 ${hashInput}
-<button type="submit" class="btn-continue">继续（接受这些警告，继续跑）</button>
+<button type="submit" class="btn-continue" title="接受这些警告，带上内容哈希重新提交这一批">继续</button>
 </form>
 <form method="post" action="/badge/modify">
 <input type="hidden" name="token" value="${escapeHtml(token ?? '')}">
 <input type="hidden" name="runId" value="${escapeHtml(batch.key)}">
-<button type="submit" class="btn-modify" title="把批次 ${escapeHtml(batch.key)} 的 spec 放回暂存区（按 id 去重，不覆盖已有草稿），接着编辑">修改（放回暂存区，接着改）</button>
+<button type="submit" class="btn-modify" title="把批次 ${escapeHtml(batch.key)} 的 spec 放回暂存区（按 id 去重，不覆盖已有草稿），接着编辑">修改</button>
 </form>
+</span>
 </div>
+<p class="batch-awaiting-note"><strong>待确认</strong>：干跑没有任何硬错误，只有 ${warnings.length} 条<b>单向蕴含警告</b>。
+单向蕴含是徽章系统的固有性质（越稀有的徽章必然被更宽的徽章包含），<strong>它不阻止写入，也不是失败</strong>；
+工作区仍然零改动。点「继续」才写盘；点「修改」则把这一批的 spec <b>放回暂存区</b>，可以接着改。</p>
+<details class="awaiting-warnings">
+<summary>展开警告清单（${warnings.length} 条）</summary>
+${list}
+</details>
 </div>`;
+}
+
+/**
+ * 「待确认」独立区块（`id="awaiting"`）：当前这次运行需要你决定的事，紧挨状态卡。
+ *
+ * 没有待确认批次时返回空串——页面里连这个 section 都不出现。
+ */
+export function renderAwaitingSection(batches: readonly TreeBatch[], options: { token?: string } = {}): string {
+  const awaiting = batches.filter(batch => batch.state === 'awaiting');
+  if (awaiting.length === 0) return '';
+  const blocks = awaiting.map(batch => renderAwaitingBlock(batch, options.token)).join('\n');
+  return `<section class="card" id="awaiting">\n${blocks}\n</section>`;
 }
 
 /**
@@ -156,10 +190,13 @@ function renderRestore(batch: TreeBatch, token?: string): string {
 }
 
 /**
- * 整棵树。
+ * 整棵树（**只含历史批次与待运行批次**）。
  *
- * 形态：成功的批次收成一行（`<details>` 折叠），失败的批次默认展开（`open`），
- * 当前待运行批次始终展开。
+ * 形态：**全部默认折叠**——只留标题行，明细要点开才看。理由：服务端每次渲染都是初值，
+ * 而「默认展开」意味着刷新就回到一屏警告；待确认块已经搬到状态卡下方、按钮也上了标题行，
+ * 因此折叠不会让任何操作变难（这是折叠与「按钮上标题行」能同时成立的前提）。
+ *
+ * 折叠状态由服务端决定、**不做持久化**：`<details>` 不带 `open`，页面里没有为它准备的 JS。
  */
 export function renderBatchTree(batches: readonly TreeBatch[], options: { token?: string } = {}): string {
   if (batches.length === 0) {
@@ -169,13 +206,10 @@ export function renderBatchTree(batches: readonly TreeBatch[], options: { token?
     .map(batch => {
       const header = `<summary>${renderBatchIcon(batch)}<span class="batch-title">${escapeHtml(batch.title)}</span>`
         + `<span class="batch-count">${batch.items.length} 条</span></summary>`;
-      const open = batch.pending || batch.state === 'failed' || batch.state === 'awaiting' ? ' open' : '';
       const restore = batch.state === 'failed' && batch.canRestore ? `\n${renderRestore(batch, options.token)}` : '';
-      const body =
-        batch.state === 'awaiting'
-          ? `${renderItems(batch, options.token)}\n${renderAwaiting(batch, options.token)}`
-          : `${renderItems(batch, options.token)}${restore}`;
-      return `<details class="batch batch-${batch.pending ? 'pending' : batch.state}" id="batch-${escapeHtml(batch.key)}"${open}>\n`
+      // 待确认块**不在这里**：它渲染在状态卡下方（见 renderAwaitingSection）。
+      const body = `${renderItems(batch, options.token)}${restore}`;
+      return `<details class="batch batch-${batch.pending ? 'pending' : batch.state}" id="batch-${escapeHtml(batch.key)}">\n`
         + `${header}\n${body}\n</details>`;
     })
     .join('\n');

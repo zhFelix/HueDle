@@ -127,14 +127,18 @@ describe('测试 4/5：条目上的 ✕ 只给能归因的那一条', () => {
   });
 });
 
-describe('树形形态：成功的收成一行、失败的展开', () => {
-  it('成功批次 details 不 open；失败批次 open', () => {
+describe('树形形态：所有批次默认只留标题行（全部折叠）', () => {
+  it('待运行 / 成功 / 失败 / 待确认的 details 都不带 open', () => {
+    const pending = batch({ key: 'run-pending', state: 'pending', pending: true });
     const success = batch({ key: 'run-ok', state: 'succeeded' });
     const failed = batch({ key: 'run-bad', state: 'failed', reason: 'x' });
-    const html = renderBatchTree([success, failed]);
-    expect(html).toContain('id="batch-run-ok"');
-    expect(html).not.toMatch(/id="batch-run-ok"[^>]* open/);
-    expect(html).toMatch(/id="batch-run-bad"[^>]* open/);
+    const awaiting = batch({ key: 'run-await', state: 'awaiting', warnings: [] });
+    const html = renderBatchTree([pending, success, failed, awaiting]);
+    // 渲染出的 <details> 一个都不能带 open（刷新不会回到展开态）。
+    expect(html).not.toMatch(/<details[^>]*\sopen/);
+    expect(html).not.toContain(' open>');
+    expect(html).not.toContain(' open ');
+    expect(html.match(/<details/g)).toHaveLength(4);
   });
 });
 

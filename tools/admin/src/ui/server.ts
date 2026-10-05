@@ -29,7 +29,9 @@ import {
   addDraft,
   continuePendingBatch,
   draftFieldsFromForm,
+  readStaging,
   removeDraft,
+  replaceDraft,
   restoreBatchDrafts,
   runStagedBatch,
   type ContinueStagedOptions,
@@ -40,7 +42,7 @@ import {
 } from '../addbadge/staging';
 import { buildBatchTree, type TreeBatch } from '../addbadge/tree';
 import { addBadgePaths, readStatus, type StatusView } from '../addbadge/state';
-import { renderBadgePage, renderBadgeStatusJson } from './badge';
+import { renderBadgePage, renderBadgeStatusJson, type BadgeFormValues } from './badge';
 import { renderUiError, renderUiPage } from './render';
 
 /**
@@ -104,6 +106,13 @@ export interface UiBadgeOptions {
    */
   stageDraft?: (adminRoot: string, fields: DraftFields) => StagedDraft;
   deleteDraft?: (adminRoot: string, draftId: string) => boolean;
+  /**
+   * 原地替换一条草稿（`?edit=<id>` 载入表单后「只保存」时走这条路）。
+   * 默认 {@link replaceDraft}；返回 `null` 表示该 draftId 已不在暂存区。
+   */
+  updateDraft?: (adminRoot: string, draftId: string, fields: DraftFields) => StagedDraft | null;
+  /** 读取暂存区（`?edit=<id>` 预填表单用）；默认 {@link readStaging}。 */
+  readStaging?: (adminRoot: string) => StagedDraft[];
   /**
    * 统一跑：默认 {@link runStagedBatch}（走**现有**批量管道 `submitBadgeBatchJob`）。
    * 测试可注入以断言 HTTP 层只负责转发。
@@ -374,6 +383,12 @@ async function handleBadgeSubmit(
  *
  * 零计算：不解析 `when`/`evalHelpers`、不校验 spec、不抢锁、不拉子进程、不跑干跑。
  * 因此它瞬间返回；合法性问题推迟到点「统一跑」时才反馈（用户明确接受）。
+ *
+ * 两种落点（`?edit=<id>` 打开的表单会带 `replaces`）：
+ *   - **没有 `replaces`**：照旧**追加**一条新草稿；
+ *   - **有 `replaces`**：**原地替换**那条草稿（数量不变）——「编辑」的语义。
+ *     若那条草稿已经不在了（另一个标签页删了/已统一跑清空），**退回追加**并明确告知，
+ *     免得用户填好的内容凭空丢掉。
  */
 async function handleBadgeSave(
   badge: UiBadgeOptions,
@@ -384,8 +399,26 @@ async function handleBadgeSave(
   const fields = await readAuthorizedForm(token, req, res);
   if (!fields) return;
   try {
+    const draftFields = draftFieldsFromForm(fields);
+    const replaces = (fields.get('replaces') ?? '').trim();
+    if (replaces) {
+      const update = badge.updateDraft ?? replaceDraft;
+      const updated = update(badge.adminRoot, replaces, draftFields);
+      if (updated) {
+        redirect(res, `/badge?updated=${encodeURIComponent(updated.fields.id || updated.draftId)}`);
+        return;
+      }
+      const stage = badge.stageDraft ?? addDraft;
+      const draft = stage(badge.adminRoot, draftFields);
+      redirect(
+        res,
+        `/badge?saved=${encodeURIComponent(draft.fields.id || draft.draftId)}`
+        + `&replacesMissing=${encodeURIComponent(replaces)}`,
+      );
+      return;
+    }
     const stage = badge.stageDraft ?? addDraft;
-    const draft = stage(badge.adminRoot, draftFieldsFromForm(fields));
+    const draft = stage(badge.adminRoot, draftFields);
     redirect(res, `/badge?saved=${encodeURIComponent(draft.fields.id || draft.draftId)}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -588,22 +621,40 @@ async function handleRequest(
     const modified = url.searchParams.get('modified');
     const restoredCount = url.searchParams.get('restored');
     const restoredFrom = url.searchParams.get('from');
+    const updated = url.searchParams.get('updated');
+    const replacesMissing = url.searchParams.get('replacesMissing');
+
+    // `?edit=<draftId>`：把那条草稿载入表单（零 JS：预填全在服务端）。
+    // 找不到时**不报错页**——回落成空白表单 + 一条说明，用户还能继续干活。
+    const editId = url.searchParams.get('edit');
+    let form: BadgeFormValues | undefined;
+    let editMissing: string | undefined;
+    if (editId !== null) {
+      const drafts = (options.badge.readStaging ?? readStaging)(options.badge.adminRoot);
+      const draft = drafts.find(item => item.draftId === editId);
+      if (draft) form = { ...draft.fields, replaces: draft.draftId };
+      else editMissing = `找不到草稿 ${JSON.stringify(editId)}（可能已被删除，或统一跑已清空暂存区）：已回落为空白表单。`;
+    }
+
     const message = error
       ? `提交被拒绝：${error}`
       : submitted
         ? `已提交：${submitted}。管道在子进程里跑。`
         : continued
           ? `已继续：${continued}（带上了上次的内容哈希，接着往下跑）。`
-          : saved
-            ? `已保存到暂存区：${saved}（未跑任何东西）。`
-            : deleted
-              ? '已从暂存区删除。'
-              : modified
-                ? restoredCount
-                  ? `已「修改」：把批次 ${restoredFrom ?? ''} 的 ${restoredCount} 条 spec 放回了暂存区`
-                    + '（不覆盖已有草稿、按 id 去重），可以接着改。仓库零改动、无快照。'
-                  : '已返回编辑状态：该批次没有可放回暂存区的 spec（作业文件不在或草稿都已在暂存区）。'
-                : undefined;
+          : updated
+            ? `已更新暂存区草稿：${updated}（原地替换，未新增条目，未跑任何东西）。`
+            : saved
+              ? `已保存到暂存区：${saved}（未跑任何东西）。`
+              + (replacesMissing ? `原草稿 ${replacesMissing} 已不存在，这条改成了新增。` : '')
+              : deleted
+                ? '已从暂存区删除。'
+                : modified
+                  ? restoredCount
+                    ? `已「修改」：把批次 ${restoredFrom ?? ''} 的 ${restoredCount} 条 spec 放回了暂存区`
+                      + '（不覆盖已有草稿、按 id 去重），可以接着改。仓库零改动、无快照。'
+                    : '已返回编辑状态：该批次没有可放回暂存区的 spec（作业文件不在或草稿都已在暂存区）。'
+                  : editMissing;
     send(
       res,
       200,
@@ -611,7 +662,8 @@ async function handleRequest(
         view,
         tree,
         message,
-        messageIsError: Boolean(error),
+        messageIsError: Boolean(error) || Boolean(editMissing),
+        ...(form ? { form } : {}),
         token,
       }),
       {},

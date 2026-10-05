@@ -2,8 +2,8 @@
  * 两级蕴含判定 + 两阶段确认流程的测试（本次改动的核心）。
  *
  * 覆盖任务要求的 9 类，重点在「放开的那一侧不能放开过头」：
- *   1. **回归**：现有 26 条严格单色徽章（`hits: 1`）当候选喂给干跑 → 没有 error 级 violation；
- *   2. `#404404` 那种（1 色、被既有徽章包含）→ 只有警告，无错误；
+ *   1. **回归**：现有全部严格单色徽章（`hits: 1`）当候选喂给干跑 → 没有 error 级 violation；
+ *   2. 严格 1 色、被既有徽章包含（不点名任何具体 id）→ 只有警告，无错误；
  *   3. **互相蕴含仍然拒绝**（两个不同 id、同一个 check）；
  *   4. 单向蕴含出现在警告清单里（对方 id / 共命中数 / Jaccard / 方向）；
  *   5. 只有警告时状态是【待确认】而**不是失败**；硬错误时才是 refused；
@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { TOTAL_COLORS } from '@huedle/shared';
+import { PRICING, TOTAL_COLORS, toColorInfo } from '@huedle/shared';
 import { loadExistingChecks, runBatchDryRun, runDryRun } from '../addbadge/dryrun';
 import {
   EXIT_AWAITING_CONFIRMATION,
@@ -43,8 +43,8 @@ import {
   readStatus,
   writeStatus,
 } from '../addbadge/state';
-import { stateFromRaw } from '../addbadge/tree';
-import { renderBatchTree } from '../ui/batch-tree';
+import { stateFromRaw, type TreeBatch } from '../addbadge/tree';
+import { renderAwaitingSection, renderBatchTree } from '../ui/batch-tree';
 import { createUiServer, listenUiServer } from '../ui/server';
 import type { StatsReport } from '../report';
 import { createFakeRepo, pipelineDeps, silenceLogs, type FakeRepo } from './addbadge.fixtures';
@@ -86,20 +86,29 @@ function makeSpec(overrides: Record<string, unknown>): BadgeSpec {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 1. 回归：现有 26 条严格单色徽章当候选 → 没有 error 级 violation
+// 1. 回归：现有全部严格单色徽章当候选 → 没有 error 级 violation
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('测试 1（回归，最重要）：现有严格单色徽章喂给干跑必须通过', () => {
-  it('128 条里 hits: 1 的全部 26 条：没有任何 error 级 violation，只有单向警告', async () => {
+  it('全部 hits: 1 的严格单色徽章：没有任何 error 级 violation，只有单向警告', async () => {
     const existing = loadExistingChecks();
     const singles = existing.filter(item => item.hits === 1);
-    // 钉住数据：这正是「越稀有的徽章越必然被更宽的徽章包含」的那一批。
-    expect(singles).toHaveLength(26);
+    // 条数**不写死**：徽章表会长大（新增 extreme-404 时就从 26 变 27）。这里从生成源
+    // `pricing.gen.ts` 推出「全部 hits === 1 的 id」，顺带钉住徽章表与定价表**一一对应**
+    // （既不缺定价，也没有孤儿定价条目）——这正是「越稀有的徽章越必然被更宽的徽章包含」的那一批。
+    expect(singles.map(item => item.id).sort()).toEqual(
+      Object.entries(PRICING)
+        .filter(([, pricing]) => pricing.hits === 1)
+        .map(([id]) => id)
+        .sort(),
+    );
+    expect(existing.map(item => item.id).sort()).toEqual(Object.keys(PRICING).sort());
+    expect(singles.length).toBeGreaterThan(0);
     expect(singles.map(item => item.id)).toContain('culture-klein-blue');
     expect(singles.map(item => item.id)).toContain('culture-facebook-blue');
     expect(singles.map(item => item.id)).toContain('culture-discord-blurple');
 
-    // 候选 = 这 26 条自己（用它们真实的 check）；existing = 其余 102 条
+    // 候选 = 这一批自己（用它们真实的 check）；existing = 表中其余的徽章
     // （候选彼此的关系由批量干跑的新 vs 新检查覆盖）。
     const singleIds = new Set(singles.map(item => item.id));
     const others = existing.filter(item => !singleIds.has(item.id));
@@ -125,11 +134,11 @@ describe('测试 1（回归，最重要）：现有严格单色徽章喂给干�
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. extreme-404 那种：1 色、被 13 条包含 → 只有警告
+// 2. 严格 1 色、被既有徽章包含 → 只有警告（不点名任何具体 id）
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('测试 2：extreme-404（严格 #404404）只有警告、无错误', () => {
-  it('hits = 1，与既有徽章的 13 处蕴含全部是 warning 级', async () => {
+describe('测试 2：严格单色候选只能构成单向蕴含（只有警告、无错误）', () => {
+  it('hits = 1，蕴含只指向本批次之外的既有徽章、且全部是 warning 级', async () => {
     const spec = parseBadgeSpec({
       id: 'extreme-404',
       name: '极四零四',
@@ -140,14 +149,36 @@ describe('测试 2：extreme-404（严格 #404404）只有警告、无错误', (
     });
     // 真的把 spec 编译成谓词（不是手写一个 check 糊弄过去）。
     const compiled = await compileSpec(spec, REPO_ROOT);
-    const result = runDryRun({ check: compiled.predicate, existing: loadExistingChecks(), total: TOTAL_COLORS });
+    // 候选自己现在**真的在徽章表里**（这次新增的 extreme-404 已落地），但干跑要模拟的是
+    // 「它还没被加进去」那一刻：existing 必须按本批 id **通用地**剔掉本批候选，
+    // 而不是点名某个 id。否则候选会与表里的自己等价 → 走 error 分支。
+    const existing = loadExistingChecks().filter(item => item.id !== spec.id);
+    const result = runDryRun({ check: compiled.predicate, existing, total: TOTAL_COLORS });
 
     expect(result.hits).toBe(1);
     expect(result.violations).toEqual([]);
-    expect(result.warnings).toHaveLength(13);
-    expect(result.implications).toHaveLength(13);
+    // 蕴含只能指向**本批次之外**的既有徽章，绝不能是本批候选自己。
+    const existingIds = new Set(existing.map(item => item.id));
+    expect(result.implications.map(item => item.id)).not.toContain(spec.id);
+    for (const item of result.implications) expect(existingIds.has(item.id), item.id).toBe(true);
+    expect(result.implications.length).toBeGreaterThan(0);
     expect(result.implications.every(item => item.level === 'warning')).toBe(true);
     expect(result.implications.every(item => item.direction === 'new-subset-of-old')).toBe(true);
+    // 条数**不写死**（原来是 13）：从既有徽章表独立推出「包含这个命中色、且 hits > 1」的那些
+    // （hits === 1 的会与本批候选等价 → 那是 error，这里不该出现）。这是对干跑蕴含判定的交叉校验。
+    const hitHex = result.samples.hits[0]!;
+    const hitColor = toColorInfo({
+      r: Number.parseInt(hitHex.slice(1, 3), 16),
+      g: Number.parseInt(hitHex.slice(3, 5), 16),
+      b: Number.parseInt(hitHex.slice(5, 7), 16),
+    });
+    const expectedIds = existing
+      .filter(item => item.hits > 1 && item.check(hitColor))
+      .map(item => item.id)
+      .sort();
+    expect(expectedIds.length).toBeGreaterThan(0);
+    expect(result.implications.map(item => item.id).sort()).toEqual(expectedIds);
+    expect(result.warnings).toHaveLength(expectedIds.length);
     for (const warning of result.warnings) expect(warning).toContain('警告，不是错误');
   }, 120_000);
 });
@@ -240,40 +271,46 @@ describe('测试 5：只有警告时是【待确认】，不是失败；硬错�
     expect(stateFromRaw('refused')).toBe('failed');
   });
 
-  it('待确认批次渲染：图标有别于失败、展开可见警告清单、有继续/修改两个按钮', async () => {
-    const html = renderBatchTree(
-      [
+  it('待确认批次渲染：警告清单 + 继续/修改在**独立区块**里，树里不再重复', async () => {
+    const awaiting: TreeBatch = {
+      key: 'run-await-1',
+      title: '批次 run-await-1',
+      state: 'awaiting',
+      rawState: 'awaiting_confirmation',
+      specHash: 'hash-abc',
+      items: [{ id: 'extreme-404', name: '极四零四', family: 'extreme', failed: false }],
+      warnings: [
         {
-          key: 'run-await-1',
-          title: '批次 run-await-1',
-          state: 'awaiting',
-          rawState: 'awaiting_confirmation',
-          specHash: 'hash-abc',
-          items: [{ id: 'extreme-404', name: '极四零四', family: 'extreme', failed: false }],
-          warnings: [
-            {
-              otherId: 'channel-all-low',
-              scope: 'existing',
-              direction: 'new-subset-of-old',
-              cohits: 1,
-              jaccard: 1 / 2097152,
-              message: '⚠ 警告，不是错误：与 "channel-all-low" 构成单向蕴含（new-subset-of-old，共命中 1 色，Jaccard=0.0000）。',
-            },
-          ],
-          pending: false,
+          otherId: 'channel-all-low',
+          scope: 'existing',
+          direction: 'new-subset-of-old',
+          cohits: 1,
+          jaccard: 1 / 2097152,
+          message: '⚠ 警告，不是错误：与 "channel-all-low" 构成单向蕴含（new-subset-of-old，共命中 1 色，Jaccard=0.0000）。',
         },
       ],
-      { token: 'tok' },
-    );
-    expect(html).toContain('batch-awaiting');
-    expect(html).not.toContain('batch-failed');
-    expect(html).not.toContain('class="item-fail"');
-    expect(html).toContain('有 1 条单向蕴含警告，等待确认（这不是失败，工作区零改动）');
-    expect(html).toContain('channel-all-low');
-    expect(html).toContain('警告，不是错误');
-    expect(html).toContain('action="/badge/continue"');
-    expect(html).toContain('action="/badge/modify"');
-    expect(html).toContain('name="specHash" value="hash-abc"');
+      pending: false,
+    };
+    const section = renderAwaitingSection([awaiting], { token: 'tok' });
+    expect(section).toContain('id="awaiting"');
+    expect(section).toContain('batch-awaiting');
+    expect(section).not.toContain('batch-failed');
+    expect(section).not.toContain('class="item-fail"');
+    expect(section).toContain('有 1 条单向蕴含警告，等待确认（这不是失败，工作区零改动）');
+    expect(section).toContain('channel-all-low');
+    expect(section).toContain('警告，不是错误');
+    expect(section).toContain('action="/badge/continue"');
+    expect(section).toContain('action="/badge/modify"');
+    expect(section).toContain('name="specHash" value="hash-abc"');
+    expect(section).toContain('待确认 · 1 条单向蕴含警告');
+
+    // 树里只剩标题行：不再画待确认块（警告清单与两个写端点都不在树里）。
+    const tree = renderBatchTree([awaiting]);
+    expect(tree).toContain('id="batch-run-await-1"');
+    expect(tree).toContain('batch-awaiting');
+    expect(tree).not.toContain('action="/badge/continue"');
+    expect(tree).not.toContain('action="/badge/modify"');
+    expect(tree).not.toContain('channel-all-low');
   });
 });
 
@@ -281,18 +318,41 @@ describe('测试 5：只有警告时是【待确认】，不是失败；硬错�
 // 6. 子进程不挂在「待确认」上等
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * 在真实徽章表里**构造**一个「只构成单向蕴含」的候选颜色——不挑任何具体的色、也不点名任何 id：
+ *   - 至少被一条 `hits > 1` 的既有徽章包含 → 单向蕴含 → 走【待确认】；
+ *   - 不被任何 `hits === 1` 的既有徽章包含 → 不与任何既有徽章**等价**（等价会走 error，退出码 2）。
+ *
+ * 这样就不依赖「某个 hex 恰好与谁等价」这种巧合：徽章表变了，这里依然推出一个合法候选。
+ */
+function findOneWayImpliedColor(): { hex: string; containerIds: string[] } {
+  const existing = loadExistingChecks();
+  const singles = existing.filter(item => item.hits === 1);
+  for (let v = 0; v < TOTAL_COLORS; v += 1) {
+    const color = toColorInfo({ r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 });
+    if (singles.some(item => item.check(color))) continue;
+    const containerIds = existing.filter(item => item.hits > 1 && item.check(color)).map(item => item.id);
+    if (containerIds.length > 0) return { hex: color.hex, containerIds };
+  }
+  throw new Error('在真实徽章表里找不到「只构成单向蕴含、不与任何既有徽章等价」的颜色');
+}
+
 describe('测试 6：待确认时子进程已经退出（不是挂着等输入）', () => {
   it('真起一个子进程跑 runChild：退出码 9、状态待确认、pid 不在、锁已释放', async () => {
     const paths = ensureOutDirs(repo.adminRoot);
     const runId = 'child-await-1';
     const jobPath = join(paths.jobsDir, `${runId}.json`);
+    // 候选颜色由真实徽章表**推出来**（见上），不是写死 #404404。
+    const candidate = findOneWayImpliedColor();
+    expect(candidate.hex).toMatch(/^#[0-9a-f]{6}$/);
+    expect(candidate.containerIds.length).toBeGreaterThan(0);
     const rawSpec = {
       id: 'gray-confirm-one',
       name: '严格一色',
-      description: '严格等于 #404404（与 13 条既有徽章单向蕴含）',
+      description: `严格等于 ${candidate.hex}（只与既有徽章构成单向蕴含）`,
       family: 'gray',
       group: null,
-      when: { eq: [{ field: 'hex' }, '#404404'] },
+      when: { eq: [{ field: 'hex' }, candidate.hex] },
     };
     writeFileSync(jobPath, JSON.stringify({ runId, spec: rawSpec, logPath: join(paths.logsDir, `${runId}.log`) }), 'utf8');
 

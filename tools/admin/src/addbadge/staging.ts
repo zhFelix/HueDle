@@ -124,6 +124,26 @@ export function addDraft(
   return draft;
 }
 
+/**
+ * **原地替换**一条草稿的字段（「编辑」提交时用）。
+ *
+ * 与「删掉再加一条」的区别：`draftId` 与 `addedAt` 都保留——同一条草稿换了内容，
+ * 而不是多出来一条。列表长度因此不变（这是「编辑」而不是「追加」的定义）。
+ *
+ * 找不到 `draftId` 时**一个字节都不写**，返回 `null`（调用方决定回落成追加还是报错）。
+ */
+export function replaceDraft(adminRoot: string, draftId: string, fields: DraftFields): StagedDraft | null {
+  const drafts = readStaging(adminRoot);
+  const index = drafts.findIndex(draft => draft.draftId === draftId);
+  if (index < 0) return null;
+  const previous = drafts[index]!;
+  const updated: StagedDraft = { ...previous, fields };
+  const next = [...drafts];
+  next[index] = updated;
+  writeStaging(adminRoot, next);
+  return updated;
+}
+
 /** 删一条草稿；返回是否真的删掉了。 */
 export function removeDraft(adminRoot: string, draftId: string): boolean {
   const drafts = readStaging(adminRoot);

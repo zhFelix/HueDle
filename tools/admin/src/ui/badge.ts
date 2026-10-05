@@ -12,10 +12,34 @@
  */
 import type { StatusView } from '../addbadge/state';
 import type { TreeBatch } from '../addbadge/tree';
+import type { DraftFields } from '../addbadge/staging';
 import { FAMILIES } from '../addbadge/spec';
 import { UI_CSS } from './render';
-import { renderBatchTree } from './batch-tree';
+import { renderAwaitingSection, renderBatchTree } from './batch-tree';
 import { escapeHtml } from '../render/html';
+
+/**
+ * 表单的**服务端预填值**：字段名与 {@link DraftFields} 一一对应。
+ *
+ * `replaces` 有值时表示这是「编辑暂存区里的某条草稿」：表单里会多一个隐藏字段
+ * `name="replaces" value="<draftId>"`，「只保存」据此**替换**那条草稿而不是追加
+ * （零 JS：预填与替换语义都在服务端完成）。
+ */
+export interface BadgeFormValues extends DraftFields {
+  replaces?: string;
+}
+
+const EMPTY_FORM: BadgeFormValues = {
+  id: '',
+  name: '',
+  description: '',
+  family: '',
+  group: '',
+  mode: 'when',
+  when: '',
+  check: '',
+  evalHelpers: '',
+};
 
 export interface BadgePageOptions {
   view: StatusView;
@@ -25,6 +49,8 @@ export interface BadgePageOptions {
   message?: string | undefined;
   /** 消息是否为错误。 */
   messageIsError?: boolean;
+  /** 表单预填（`?edit=<草稿id>` 时带上那条草稿的值）。缺省为空表单。 */
+  form?: BadgeFormValues | undefined;
   /**
    * 表单令牌（跨站页面读不到本页，因此拿不到它）。
    *
@@ -120,6 +146,7 @@ const BADGE_PAGE_JS = `(function () {
 /** 加徽章页：服务端渲染初值 + 极少量内联 JS 轮询。 */
 export function renderBadgePage(options: BadgePageOptions): string {
   const { view, tree } = options;
+  const form = options.form ?? EMPTY_FORM;
   const message = options.message
     ? `<p class="${options.messageIsError ? 'warning' : 'meta'}">${escapeHtml(options.message)}</p>`
     : '';
@@ -130,8 +157,20 @@ export function renderBadgePage(options: BadgePageOptions): string {
     view.lock.kind === 'active'
       ? `<p class="note">当前锁：${escapeHtml(view.lock.lock.runId)}（pid ${view.lock.lock.pid}）——新的提交会被<strong>拒绝</strong>，不排队。</p>`
       : '';
-  const familyOptions = FAMILIES.map(family => `<option value="${escapeHtml(family)}">${escapeHtml(family)}</option>`).join('');
+  const familyOptions = FAMILIES.map(
+    family => `<option value="${escapeHtml(family)}"${family === form.family ? ' selected' : ''}>${escapeHtml(family)}</option>`,
+  ).join('');
+  // 编辑模式的隐藏字段：提交时「只保存」据此替换，而不是追加。
+  const replacesField = form.replaces
+    ? `<input type="hidden" name="replaces" value="${escapeHtml(form.replaces)}">`
+    : '';
+  const editingNote = form.replaces
+    ? `<p class="question">正在<strong>编辑</strong>暂存区草稿 <code>${escapeHtml(form.replaces)}</code>：`
+      + '点「只保存到暂存区」会<strong>替换</strong>它（不新增一条）。想放弃改动就重新打开 <a href="/badge">空白表单</a>。</p>'
+    : '';
   const hasPending = tree.some(batch => batch.pending);
+  // 待确认紧挨状态卡：状态卡说的是**当前这次运行**，待确认正是这次运行要你决定的事。
+  const awaiting = renderAwaitingSection(tree, { token: options.token });
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -174,16 +213,30 @@ export function renderBadgePage(options: BadgePageOptions): string {
   .item-name { color: var(--neutral-400); }
   .item-family { color: var(--neutral-500); font-size: .75rem; }
   .item-fail { color: var(--red-300); font-weight: 700; }
-  .draft-del { margin-left: auto; }
+  .draft-del { margin-left: 0; }
   .draft-del button { background: transparent; border: 0; color: var(--neutral-500); cursor: pointer; font-size: .75rem; }
   .draft-del button:hover { color: var(--red-300); }
+  .draft-edit { margin-left: auto; color: var(--amber-300); font-size: .75rem; text-decoration: none; }
+  .draft-edit:hover { text-decoration: underline; }
   .run-bar { margin-top: .6rem; }
   .run-bar button { background: var(--amber-400); color: var(--ink-950); border: 0; border-radius: 9999px; padding: .4rem 1.2rem; font-weight: 700; cursor: pointer; }
   .run-bar button:disabled { background: var(--ink-800); color: var(--neutral-500); cursor: not-allowed; }
   .run-bar .mode-note { margin: .4rem 0 0; }
-  /* ── 待确认：警告清单 + 继续/修改 ── */
-  .batch-awaiting { margin: 0 .75rem .7rem 2.4rem; border-left: 3px solid var(--amber-400); padding: .5rem .7rem; background: var(--ink-950); border-radius: .4rem; }
-  .batch-awaiting-note { color: var(--neutral-300); font-size: .78rem; margin: 0 0 .5rem; line-height: 1.5; }
+  /* ── 待确认独立区块（状态卡正下方）：标题行带条数 + 继续/修改，警告清单折进 details ── */
+  .awaiting-block { border-left: 3px solid var(--amber-400); padding: .5rem .7rem; background: var(--ink-950); border-radius: .4rem; }
+  .awaiting-block + .awaiting-block { margin-top: .8rem; }
+  .awaiting-head { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; }
+  .awaiting-title { font-family: var(--font-mono); font-size: .85rem; color: var(--neutral-100); }
+  .awaiting-actions { display: flex; gap: .6rem; align-items: center; margin-left: auto; }
+  .awaiting-actions button { border: 0; border-radius: 9999px; padding: .35rem 1.05rem; font-weight: 700; cursor: pointer; }
+  .awaiting-actions .btn-continue { background: var(--amber-400); color: var(--ink-950); }
+  .awaiting-actions .btn-continue:hover { background: var(--amber-200); }
+  .awaiting-actions .btn-modify { background: var(--ink-800); color: var(--neutral-200); border: 1px solid var(--ink-700); }
+  .awaiting-actions .btn-modify:hover { color: var(--neutral-100); }
+  .awaiting-warnings { margin-top: .4rem; }
+  .awaiting-warnings > summary { cursor: pointer; color: var(--neutral-400); font-size: .78rem; }
+  .awaiting-warnings > summary:hover { color: var(--neutral-200); }
+  .batch-awaiting-note { color: var(--neutral-300); font-size: .78rem; margin: .6rem 0 .5rem; line-height: 1.5; }
   .batch-awaiting-note strong { color: var(--amber-300); }
   .batch-warnings { list-style: none; margin: 0 0 .6rem; padding: 0; }
   .batch-warning { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: baseline; padding: .3rem 0; border-top: 1px solid var(--ink-800); font-size: .76rem; }
@@ -191,12 +244,6 @@ export function renderBadgePage(options: BadgePageOptions): string {
   .warning-other { font-family: var(--font-mono); color: var(--neutral-100); }
   .warning-meta { color: var(--neutral-500); font-family: var(--font-mono); font-size: .7rem; }
   .warning-text { flex: 1 1 100%; color: var(--neutral-400); }
-  .batch-actions { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
-  .batch-actions button { border: 0; border-radius: 9999px; padding: .35rem 1.05rem; font-weight: 700; cursor: pointer; }
-  .batch-actions .btn-continue { background: var(--amber-400); color: var(--ink-950); }
-  .batch-actions .btn-continue:hover { background: var(--amber-200); }
-  .batch-actions .btn-modify { background: var(--ink-800); color: var(--neutral-200); border: 1px solid var(--ink-700); }
-  .batch-actions .btn-modify:hover { color: var(--neutral-100); }
   /* ── 恢复来源标记 + 失败批次的恢复入口 ── */
   .item-restored { color: var(--amber-300); font-size: .72rem; }
   .batch-restore { margin: 0 .75rem .7rem 2.4rem; border-left: 3px solid var(--ink-700); padding: .5rem .7rem; background: var(--ink-950); border-radius: .4rem; }
@@ -222,35 +269,39 @@ ${lockNote}
 <pre class="status" id="status-body">${escapeHtml(statusText(view))}</pre>
 </section>
 
+${awaiting}
+
 <section>
 <h2>添加一条徽章</h2>
+${editingNote}
 <p class="question">两条路径都是一等公民：<strong>结构化</strong>（写 when，JSON 表达式，只用 helpers.ts）与
 <strong>手写</strong>（写 check 单表达式，可引用家族文件里已有的 private helper）。</p>
 <form class="badge" method="post" action="/badge/submit">
   <input type="hidden" name="token" value="${escapeHtml(options.token ?? '')}">
+  ${replacesField}
   <div class="grid2">
-    <div><label for="id">id（kebab-case，全局唯一）</label><input id="id" name="id" type="text" required placeholder="gray-mid-echo"></div>
-    <div><label for="name">name（中文，家族内不重名）</label><input id="name" name="name" type="text" required></div>
+    <div><label for="id">id（kebab-case，全局唯一）</label><input id="id" name="id" type="text" required placeholder="gray-mid-echo" value="${escapeHtml(form.id)}"></div>
+    <div><label for="name">name（中文，家族内不重名）</label><input id="name" name="name" type="text" required value="${escapeHtml(form.name)}"></div>
   </div>
   <label for="description">description（可判定的条件，读者能据此手算）</label>
-  <input id="description" name="description" type="text" required>
+  <input id="description" name="description" type="text" required value="${escapeHtml(form.description)}">
   <div class="grid2">
     <div><label for="family">family（必须与目标文件名一致）</label><select id="family" name="family">${familyOptions}</select></div>
-    <div><label for="group">group（可选；只有真的有包含链时才用）</label><input id="group" name="group" type="text" placeholder="casino-rank-count"></div>
+    <div><label for="group">group（可选；只有真的有包含链时才用）</label><input id="group" name="group" type="text" placeholder="casino-rank-count" value="${escapeHtml(form.group)}"></div>
   </div>
   <label for="mode">路径</label>
   <select id="mode" name="mode">
-    <option value="when">结构化：when（JSON 表达式，只用 helpers.ts）</option>
-    <option value="handwritten">手写：check（单表达式，可引用文件里已有的 private helper）</option>
+    <option value="when"${form.mode === 'when' ? ' selected' : ''}>结构化：when（JSON 表达式，只用 helpers.ts）</option>
+    <option value="handwritten"${form.mode === 'handwritten' ? ' selected' : ''}>手写：check（单表达式，可引用文件里已有的 private helper）</option>
   </select>
   <label for="when">when（结构化路径用；例：{"all":[{"le":[{"sub":[{"maxChannel":true},{"minChannel":true}]},2]},{"between":[{"minChannel":true},120,136]}]}）</label>
-  <textarea id="when" name="when"></textarea>
+  <textarea id="when" name="when">${escapeHtml(form.when)}</textarea>
   <label for="check">check（手写路径用；例：onRanks(c, counts =&gt; counts.filter(n =&gt; n &gt;= 5).length === 1)）</label>
-  <textarea id="check" name="check"></textarea>
+  <textarea id="check" name="check">${escapeHtml(form.check)}</textarea>
   <label for="evalHelpers">evalHelpers（手写路径用；JSON **名字数组**：["onRanks","ranksAtLeast"]。干跑直接 import 目标文件里的真品，不需要实现源码）</label>
-  <textarea id="evalHelpers" name="evalHelpers"></textarea>
+  <textarea id="evalHelpers" name="evalHelpers">${escapeHtml(form.evalHelpers)}</textarea>
   <label><input type="checkbox" name="force" value="1"> force：检出未跑完的管道时强制接管锁（默认拒绝并报告）</label>
-  <button type="submit" class="save" formaction="/badge/save">只保存到暂存区（零计算、不碰徽章源码）</button>
+  <button type="submit" class="save" formaction="/badge/save">${form.replaces ? '只保存到暂存区（替换这条草稿）' : '只保存到暂存区（零计算、不碰徽章源码）'}</button>
   <button type="submit">提交（管道在子进程里跑，约 10–15 分钟）</button>
 </form>
 <p class="mode-note">「只保存」只做一件事：把这条 spec 原子写进本机暂存区文件——不校验、不干跑、不抢锁、不拉子进程。
@@ -262,7 +313,9 @@ ${lockNote}
 <p class="question">批次 = 一次「统一跑」的单位。左边是状态：空圈=待运行、转圈=正在运行、绿底白勾=成功、
 <b>琥珀 ! = 有单向蕴含警告待确认（这不是失败）</b>、红底白叉=失败；
 失败能归因到某一条时，只在那一条上加 ✕（hover 显示它自己的原因）。
-「待确认」的批次展开后可以看到警告清单，并选择「继续」或「修改」。</p>
+批次<strong>默认只显示标题行</strong>，点标题看明细。有一条<b>待确认</b>批次时，
+它的警告清单与「继续」「修改」在最上面的「待确认」区块里。
+暂存区每条草稿带「编辑」（载入上方表单，改完「只保存」替换它）与「删除」。</p>
 <div id="batch-tree">
 ${renderBatchTree(tree, { token: options.token })}
 </div>
