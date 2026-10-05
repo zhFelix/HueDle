@@ -23,6 +23,22 @@
  * 没记录的那天是 `kind: 'gap'`（占位块，组件里画成虚线灰块）。
  *
  * `gap` 不伪造颜色、不伪造 cp / rarity——没有的东西就是没有。
+ *
+ * ── 折行与渐变：为什么在纯函数层算 ──────────────────────────────────────────
+ *
+ * 相邻两天之间要画一段 `from → to` 的渐变，但**渐变只允许出现在「相邻且都有记录」
+ * 的两天之间**：
+ *
+ *   - 缺口两侧必须断开。渐变表达的是「这两天是连着的」，跨缺口画渐变等于把
+ *     「断了两天」画成「连在一起」——那正好抹掉这条时间线存在的意义。
+ *   - 换行处必须断开。折行之后「行尾」和「下一行行首」在空间上不相邻，那里画
+ *     渐变同样是撒谎。
+ *
+ * 这两条规则都需要知道「两个格子是不是真正的左右邻居」。在 CSS 里做不了
+ * （`:first-child` 管不了 flex 换行的行首），所以折行**由这里显式算出来**：
+ * {@link layoutTimeline} 把日期切成固定容量的行，**渐变只连同一行内、相邻且都
+ * 有记录的两个格子**；行首格子的 `link` 恒为 `null`。容量由组件按容器宽度实测
+ * 后传入（见 `ColorTimeline.vue`），所以折行位置既能自适应，又完全可单测。
  */
 import type { ScoreRarity } from '@huedle/shared';
 import { previousUtcDay, type HistoryItem } from './storage';
@@ -116,6 +132,111 @@ export function buildTimeline(entries: readonly HistoryItem[], today?: string): 
       isToday: today !== undefined && date === today,
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// 折行 + 相邻渐变
+// ---------------------------------------------------------------------------
+
+/**
+ * 默认每行容量（天）。
+ *
+ * 只在**容器宽度未知**时兜底（组件还没挂载、`clientWidth` 为 0 的 jsdom、
+ * 或 `display:none` 的隐藏容器）。真实浏览器里组件会用实测宽度覆盖它。
+ */
+export const DEFAULT_DAYS_PER_ROW = 30;
+
+/**
+ * 相邻两天的颜色连接（渲染成一小段 `from → to` 的渐变）。
+ *
+ * `from` 是较早那天、`to` 是较晚那天——渐变方向恒为「时间前进的方向」。
+ */
+export interface TimelineLink {
+  /** 较早那天的 `#RRGGBB`（渐变起点）。 */
+  from: string;
+  /** 较晚那天的 `#RRGGBB`（渐变终点）。 */
+  to: string;
+}
+
+/** 一行里的一格：一天 + 它左侧填缝要不要画渐变。 */
+export interface TimelineCell {
+  day: TimelineDay;
+  /**
+   * 左侧填缝的渐变。
+   *
+   * `null` 表示这一格左侧是**硬边**，只有两种可能，两种都是刻意的：
+   *   - 它是一行的第一格（行首与上一行的行尾在空间上不相邻）；
+   *   - 它的前一天没有记录（缺口）或是所有记录的第一天。
+   */
+  link: TimelineLink | null;
+  /** 是否是所在行的第一格（行首：左侧没有邻居，永远不画渐变）。 */
+  isRowStart: boolean;
+}
+
+/** 折行后的一行（`index` 从 0 起，0 是最早的那一行）。 */
+export interface TimelineRow {
+  index: number;
+  cells: TimelineCell[];
+}
+
+/**
+ * 把日期切成多行，并算出每格左侧的渐变。
+ *
+ * 规则（与组件注释里的两条语义一一对应）：
+ *
+ *   1. **渐变只出现在同一行内、相邻且都有记录的两天之间**。
+ *      因为每一天（含缺口）都占一格，「相邻」就是「日历上相邻」；缺口那格是
+ *      `kind: 'gap'`，本身不产生 `link`，于是缺口两侧的链条**天然断开**。
+ *   2. **行首不画渐变**（`isRowStart`），所以行尾收在当天颜色，不会向下一行发散。
+ *
+ * 纯函数：不改 `days`、不读时钟、不读 DOM。`perRow` 非法（≤ 0 / NaN / Infinity）
+ * 时按 1 或 {@link DEFAULT_DAYS_PER_ROW} 兜底，绝不产出 `NaN`。
+ *
+ * @param days    {@link buildTimeline} 的输出（升序、含缺口）。
+ * @param perRow  每行放几格（组件按容器宽度实测后传入）。
+ */
+export function layoutTimeline(
+  days: readonly TimelineDay[],
+  perRow: number = DEFAULT_DAYS_PER_ROW,
+): TimelineRow[] {
+  if (days.length === 0) return [];
+
+  const raw = Number.isFinite(perRow) ? Math.floor(perRow) : DEFAULT_DAYS_PER_ROW;
+  const capacity = Math.max(1, raw);
+
+  const rows: TimelineRow[] = [];
+  for (let start = 0; start < days.length; start += capacity) {
+    const slice = days.slice(start, start + capacity);
+    const cells = slice.map<TimelineCell>((day, i) => {
+      const prev = i > 0 ? slice[i - 1] : undefined;
+      // 「相邻且都有记录」——缺口的 kind 不是 entry，链条在这里断掉。
+      const link =
+        prev !== undefined && prev.kind === 'entry' && day.kind === 'entry'
+          ? { from: prev.hex, to: day.hex }
+          : null;
+
+      return { day, link, isRowStart: i === 0 };
+    });
+
+    rows.push({ index: rows.length, cells });
+  }
+
+  return rows;
+}
+
+/**
+ * 行内所有渐变的扁平列表（按 DOM 顺序），便于断言「哪些天之间被连起来了」。
+ *
+ * **不返回跨缺口 / 跨行的连接**——`layoutTimeline` 根本不会造出那种连接。
+ */
+export function timelineLinks(rows: readonly TimelineRow[]): TimelineLink[] {
+  const links: TimelineLink[] = [];
+  for (const row of rows) {
+    for (const cell of row.cells) {
+      if (cell.link !== null) links.push(cell.link);
+    }
+  }
+  return links;
 }
 
 /**

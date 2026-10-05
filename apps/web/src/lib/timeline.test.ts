@@ -10,10 +10,13 @@
 import { describe, expect, it } from 'vitest';
 import type { HistoryItem } from './storage';
 import {
+  DEFAULT_DAYS_PER_ROW,
   buildTimeline,
   countGapDays,
   countRecordedDays,
+  layoutTimeline,
   timelineAriaLabel,
+  timelineLinks,
   timelineTitle,
   type TimelineEntryDay,
 } from './timeline';
@@ -25,6 +28,15 @@ function item(date: string, over: Partial<HistoryItem> = {}): HistoryItem {
 /** 只有日期的序列，便于断言排序。 */
 function dates(entries: readonly HistoryItem[], today?: string): string[] {
   return buildTimeline(entries, today).map(day => day.date);
+}
+
+/** 从 `2026-03-01` 起连续 `n` 天，第 i 天（0 起）的 hex 是 `#00000i`。 */
+function consecutive(n: number): HistoryItem[] {
+  return Array.from({ length: n }, (_, i) =>
+    item(new Date(Date.UTC(2026, 2, 1 + i)).toISOString().slice(0, 10), {
+      hex: `#${String(i).padStart(6, '0')}`,
+    }),
+  );
 }
 
 describe('① 排布：连续 5 天 → 5 个色块，按日期从左到右', () => {
@@ -326,5 +338,149 @@ describe('⑦ 纯函数：不改输入、不读时钟、确定性', () => {
 
     expect(withToday.map(day => day.date)).toEqual(withoutToday.map(day => day.date));
     expect(withToday.map(day => day.isToday)).toEqual([false, true]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑧ / ⑨ 折行 + 相邻渐变（本轮新增的两条语义）
+// ---------------------------------------------------------------------------
+
+describe('⑧ 折行：N 天按每行容量切成预期行数', () => {
+  it('7 天 / 每行 3 → 3 行，行大小 3 / 3 / 1，且所有天都还在（不丢不重）', () => {
+    const days = buildTimeline(consecutive(7), '2026-03-07');
+    const rows = layoutTimeline(days, 3);
+
+    expect(rows).toHaveLength(3);
+    expect(rows.map(row => row.cells.length)).toEqual([3, 3, 1]);
+    expect(rows.map(row => row.index)).toEqual([0, 1, 2]);
+    expect(rows.flatMap(row => row.cells.map(cell => cell.day.date))).toEqual(
+      days.map(day => day.date),
+    );
+  });
+
+  it('容量 ≥ 天数 → 1 行；容量 = 1 → 每天一行', () => {
+    const days = buildTimeline(consecutive(5), '2026-03-05');
+
+    expect(layoutTimeline(days, 5)).toHaveLength(1);
+    expect(layoutTimeline(days, 99)).toHaveLength(1);
+    expect(layoutTimeline(days, 1)).toHaveLength(5);
+    expect(layoutTimeline(days, 1).every(row => row.cells.length === 1)).toBe(true);
+  });
+
+  it('缺口也占一格：5 天有记录 + 2 缺口 = 7 格，按容量 3 折成 3 行', () => {
+    const days = buildTimeline(
+      [item('2026-03-01'), item('2026-03-02'), item('2026-03-05'), item('2026-03-06'), item('2026-03-07')],
+      '2026-03-07',
+    );
+
+    expect(days).toHaveLength(7);
+    expect(layoutTimeline(days, 3).map(row => row.cells.length)).toEqual([3, 3, 1]);
+  });
+
+  it('容量非法（0 / 负数 / NaN / Infinity）不崩，也不产出 NaN', () => {
+    const days = buildTimeline(consecutive(4), '2026-03-04');
+
+    for (const bad of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const rows = layoutTimeline(days, bad);
+      expect(rows.flatMap(row => row.cells)).toHaveLength(4);
+      expect(JSON.stringify(rows)).not.toContain('NaN');
+    }
+    // Infinity / NaN 退回兜底容量（4 天一行放得下）。
+    expect(layoutTimeline(days, Number.POSITIVE_INFINITY)).toHaveLength(1);
+    expect(layoutTimeline(days, DEFAULT_DAYS_PER_ROW)).toHaveLength(1);
+  });
+
+  it('空历史 → 0 行（不是 1 行空格子）', () => {
+    expect(layoutTimeline([], 10)).toEqual([]);
+    expect(layoutTimeline([], 0)).toEqual([]);
+  });
+});
+
+describe('⑨ 渐变连接：只在「同一行内、相邻且都有记录」的两天之间', () => {
+  it('相邻两天都有记录 → 后一格带 from→to 渐变，颜色就是两天的 hex', () => {
+    const days = buildTimeline(
+      [item('2026-03-01', { hex: '#111111' }), item('2026-03-02', { hex: '#222222' })],
+      '2026-03-02',
+    );
+    const cells = layoutTimeline(days, 30)[0]!.cells;
+
+    expect(cells[0]!.isRowStart).toBe(true);
+    expect(cells[0]!.link).toBeNull();
+    expect(cells[1]!.link).toEqual({ from: '#111111', to: '#222222' });
+    expect(timelineLinks(layoutTimeline(days, 30))).toEqual([{ from: '#111111', to: '#222222' }]);
+  });
+
+  it('缺口打断链条：跨缺口的两天之间没有渐变（这是本组件存在的意义）', () => {
+    const days = buildTimeline(
+      [
+        item('2026-03-01', { hex: '#111111' }),
+        item('2026-03-02', { hex: '#222222' }),
+        item('2026-03-05', { hex: '#555555' }),
+        item('2026-03-06', { hex: '#666666' }),
+      ],
+      '2026-03-06',
+    );
+    // 01 / 02 / 缺 03 / 缺 04 / 05 / 06
+    const cells = layoutTimeline(days, 30)[0]!.cells;
+
+    expect(cells.map(cell => cell.day.kind)).toEqual(['entry', 'entry', 'gap', 'gap', 'entry', 'entry']);
+    // 每一格左侧有没有渐变（null = 硬边）。
+    expect(cells.map(cell => cell.link)).toEqual([
+      null,
+      { from: '#111111', to: '#222222' },
+      null, // 缺口本身不画
+      null,
+      null, // 缺口之后的那天：左边是缺口，链条必须断
+      { from: '#555555', to: '#666666' },
+    ]);
+
+    const links = timelineLinks(layoutTimeline(days, 30));
+    // 02 → 05 不是邻居（中间隔着 03 / 04 两个缺口），绝不能连起来。
+    expect(links).not.toContainEqual({ from: '#222222', to: '#555555' });
+    expect(links).toHaveLength(2);
+  });
+
+  it('换行处断开：行首不继承上一行的渐变，行尾不指向下一行', () => {
+    // 8 天全部连续，但容量 3 会把 03|04 与 06|07 切开。
+    const days = buildTimeline(consecutive(8), '2026-03-08');
+    const rows = layoutTimeline(days, 3);
+
+    expect(rows.map(row => row.cells.length)).toEqual([3, 3, 2]);
+
+    // 每一行的第一格：行首、无渐变。
+    for (const row of rows) {
+      expect(row.cells[0]!.isRowStart).toBe(true);
+      expect(row.cells[0]!.link).toBeNull();
+    }
+
+    const links = timelineLinks(rows);
+    // 行内相邻的连接都在。
+    expect(links).toContainEqual({ from: '#000001', to: '#000002' });
+    expect(links).toContainEqual({ from: '#000004', to: '#000005' });
+    // 跨行的两对（02→03、05→06）不存在。
+    expect(links).not.toContainEqual({ from: '#000002', to: '#000003' });
+    expect(links).not.toContainEqual({ from: '#000005', to: '#000006' });
+    // 8 天共 7 对相邻，被两条行边界切断 2 对（02→03、05→06）→ 还剩 5 段渐变。
+    expect(links).toHaveLength(5);
+  });
+
+  it('大量断档 + 折行：跨缺口与跨行的连接都不存在，也不出现 NaN', () => {
+    const days = buildTimeline([item('2016-03-04', { hex: '#aaaaaa' }), item('2026-03-04', { hex: '#bbbbbb' })], '2026-03-04');
+    const rows = layoutTimeline(days, 30);
+
+    expect(rows).toHaveLength(Math.ceil(3653 / 30));
+    expect(rows.flatMap(row => row.cells)).toHaveLength(3653);
+    // 只有两端有记录，且它们之间隔着 3651 个缺口 → 一个连接都不该有。
+    expect(timelineLinks(rows)).toEqual([]);
+    expect(JSON.stringify(rows)).not.toContain('NaN');
+  });
+
+  it('单天 → 1 行 1 格，没有渐变', () => {
+    const rows = layoutTimeline(buildTimeline([item('2026-03-04')], '2026-03-04'), 30);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.cells).toHaveLength(1);
+    expect(rows[0]!.cells[0]!.link).toBeNull();
+    expect(rows[0]!.cells[0]!.isRowStart).toBe(true);
   });
 });
